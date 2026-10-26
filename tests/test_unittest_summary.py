@@ -122,20 +122,27 @@ def test_real_unittest_output_keeps_framework_counts_execution_unknowns_and_proc
                 "output_id": output_id,
             }, {"command": "python3 -m unittest -v"})
             compact_summary = compacted.get("test_summary")
-            assert compact_summary is not None, output
             assert compacted["output_id"] == output_id
-            for field in (
-                "tests_run", "reported_skips", "executed", "passed",
-                "report_status", "process_status",
-            ):
-                assert compact_summary[field] == summary[field]
-            assert compact_summary["status"] == ("passed" if summary["state"] == "success" else summary["state"])
+            if compact_summary is None:
+                # Older unittest emits a standalone continuation for a second
+                # skipped subtest. Compact deliberately retains unrecognized
+                # progress text rather than hiding it behind a footer summary.
+                assert case is _MultipleSubtestSkips, output
+                assert re.search(r"(?m)^[ \t]*skipped 'skip-two'$", output), output
+                assert compacted["stderr"] == output
+            else:
+                for field in (
+                    "tests_run", "reported_skips", "executed", "passed",
+                    "report_status", "process_status",
+                ):
+                    assert compact_summary[field] == summary[field]
+                assert compact_summary["status"] == ("passed" if summary["state"] == "success" else summary["state"])
 
             html_summary = Handler._output_summary(output_id, "stderr")
             assert html_summary == summary
             assert audit.read_output(output_id, "stderr", max_bytes=65536)["content"] == output
 
-            if summary["state"] == "failed":
+            if summary["state"] == "failed" or compact_summary is None:
                 assert compacted["stderr"] == output
             else:
                 assert "stderr" not in compacted

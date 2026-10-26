@@ -2,6 +2,7 @@
 
 ## 0.3.0a14 (develop)
 
+- Compress large remote Python bootstrap source before base64 encoding so nested worker/supervisor commands stay below Linux's single-argument size limit. Preserve the existing stdin, login-shell and supervision protocols.
 - Route scripts, test runners and builds through the same ordinary command/job lifecycle. Remove automatic project fingerprints, test attempts, cache invalidation and test-evidence audit/collector callbacks from execution and recovery.
 - Make legacy test history an explicit, local-only `workspace_resume(include_legacy_test_history=True)` read. Preserve stored observations without asserting that they apply to current code.
 - Make project content scanning opt-in through `workspace_snapshot(scan_content=True, max_files=..., max_content_bytes=...)`; default snapshots inspect metadata and Git state without content fingerprints or test-history comparison.

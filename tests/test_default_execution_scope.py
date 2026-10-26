@@ -36,6 +36,7 @@ import sys
 import threading
 import ast
 import base64
+import zlib
 import re
 
 REMOTE_HOME = {str(remote_home)!r}
@@ -91,7 +92,10 @@ def command_argv(current_command):
         if not match:
             return None
         try:
-            program = base64.b64decode(match.group(1), validate=True).decode("utf-8")
+            data = base64.b64decode(match.group(1), validate=True)
+            if "exec(zlib.decompress(base64.b64decode(" in current_command:
+                data = zlib.decompress(data)
+            program = data.decode("utf-8")
             tree = ast.parse(program)
             nested_command = None
             for node in ast.walk(tree):

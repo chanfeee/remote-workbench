@@ -64,6 +64,21 @@ def test_large_success_uses_full_spool_but_keeps_unknown_output(tmp_path):
         assert "test_summary" not in compact_result("exec_command", original, {"command": "python3 -m unittest -v"})
 
 
+def test_legacy_subtest_skip_continuation_keeps_complete_report_visible():
+    output = (
+        "test_subtests (tests.Example) ... skipped 'skip-one'\n"
+        "skipped 'skip-two'\n\n"
+        "----------------------------------------------------------------------\n"
+        "Ran 1 test in 0.001s\n\nOK (skipped=2)\n"
+    )
+    value = compact_result("exec_command", result(stderr=output),
+                           {"command": "python3 -m unittest -v"})
+    assert "test_summary" not in value
+    assert value["stderr"] == output
+    assert value["exit_code"] == 0
+    assert value["output_id"] == "a" * 32
+
+
 def test_skipped_unittest_counts_are_explicit_and_all_skipped_is_not_passed():
     skipped = result(
         stderr=("test_skipped (tests.Example) ... skipped 'missing optional environment'\n\n"

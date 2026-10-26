@@ -1,5 +1,12 @@
 # Validation status
 
+## Linux CI transport follow-up (0.3.0a14 develop)
+
+- The first published phase-1 CI run ([40260425221](https://github.com/chanfeee/remote-workbench/actions/runs/40260425221)) passed packaging but exposed Linux `E2BIG` failures: nested base64 worker/supervisor source exceeded the single-argument limit. Local macOS execution had not reproduced that limit. Python 3.10 also exposed a test that incorrectly required compact summarization of every unittest progress format.
+- Large Python source is now compressed with stdlib zlib before base64 encoding. The representative full worker/supervisor command is 31,780 bytes, below the usual 128 KiB Linux single-argument limit. Request bytes and heartbeats continue to use the existing stdin protocol; native login shells, command framing and process supervision are unchanged.
+- Four added transport regressions cover small/large Unicode source, binary stdin, the final nested command size and a real managed file roundtrip with an emulated Linux per-argument cap. The runtime fix passed a full **540-test local regression in 139.05 seconds**, with 122 frozen files unchanged. A subsequent test-only correction permits the existing raw-output fallback for older unittest skip continuations; the raw report, output ID and unknown execution counts remain checked, with **17 related checks passed**. No general parser expansion was introduced. The groups overlap and are not additive.
+- These checks use local workers and simulated SSH. The corresponding pushed commit's Linux/Python matrix is a separate CI result; they do not certify actual CERN/IHEP behavior or client-loaded code. Existing main/stable installations, copy directories and unpublished report edits remain unchanged.
+
 ## Ordinary execution without automatic project-test management (0.3.0a14 develop)
 
 - Phase 1 started from actual local `develop` commit `ae380a95c4bb479baf3d77980df334a882d09013`; fetched `origin/develop` was `6eb86fa8c69223ebc05dc4be94eba3ec3d7b1feb`. The three existing local commits and pre-existing report edits were preserved. This phase does not implement direct mode or change copy binding defaults.
