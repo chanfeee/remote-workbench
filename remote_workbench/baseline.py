@@ -626,10 +626,12 @@ async def apply_delivery(executor, project_root: str, files: list[dict]) -> dict
 
 async def project_fingerprint(executor, project_root: str, *, max_files: int = 10000,
                               max_bytes: int = 64 * 1024 * 1024) -> dict:
-    """Return a bounded content fingerprint for local before/after evidence.
+    """Return a bounded content fingerprint for an explicit caller.
 
-    Incomplete scans return ``digest=None`` and must not be used as proof that
-    two project states match. Symlink targets are recorded without opening them.
+    Ordinary command execution does not call this scanner. Callers opt in and
+    provide file/byte budgets. Incomplete scans return ``digest=None`` and must
+    not be used as proof that two project states match. Symlink targets are
+    recorded without opening them.
     """
     if isinstance(max_files, bool) or not isinstance(max_files, int) or not 1 <= max_files <= 100000:
         raise ValueError("max_files must be between 1 and 100000")

@@ -62,6 +62,71 @@ def test_search_response_stays_within_byte_budget_for_control_characters(tmp_pat
     assert result["next_cursor"] < result["total_bytes"]
 
 
+def test_search_small_budget_advances_after_contextless_match(tmp_path):
+    output_id = make_output(tmp_path, b"needle" + b"\\" * 1024)
+
+    first = search(tmp_path, output_id, "needle", max_bytes=1024,
+                   context_bytes=512)
+
+    assert [item["offset"] for item in first["matches"]] == [0]
+    assert first["matches"][0]["context"] == ""
+    assert first["next_cursor"] > 0
+    assert first["total_bytes"] == len(b"needle" + b"\\" * 1024)
+    assert first["scanned_bytes"] == first["next_cursor"]
+    assert len(json.dumps(first, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) <= 1024
+
+    pages = [first]
+    cursor = first["next_cursor"]
+    while cursor < first["total_bytes"]:
+        page = search(tmp_path, output_id, "needle", cursor=cursor,
+                      max_bytes=1024, context_bytes=512)
+        pages.append(page)
+        assert page["next_cursor"] > cursor
+        assert page["total_bytes"] == len(b"needle" + b"\\" * 1024)
+        assert page["scanned_bytes"] == page["next_cursor"] - cursor
+        cursor = page["next_cursor"]
+
+    assert [item["offset"] for page in pages for item in page["matches"]] == [0]
+    assert pages[-1]["next_cursor"] == len(b"needle" + b"\\" * 1024)
+    for page in pages:
+        assert len(json.dumps(page, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) <= 1024
+
+
+def test_search_small_budget_keeps_overlapping_matches_resumable(tmp_path):
+    data = b"x" * 600 + b"aaaa" + b"x" * 600
+    output_id = make_output(tmp_path, data)
+
+    pages = []
+    cursor = 600
+    while cursor < len(data):
+        page = search(tmp_path, output_id, "aa", cursor=cursor,
+                      max_scan_bytes=1024, context_bytes=512,
+                      max_matches=1, max_bytes=1024)
+        pages.append(page)
+        assert len(json.dumps(page, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) <= 1024
+        assert page["total_bytes"] == len(data)
+        assert page["scanned_bytes"] == page["next_cursor"] - cursor
+        if page["matches"]:
+            assert page["next_cursor"] > cursor
+        cursor = page["next_cursor"]
+
+    assert [item["offset"] for page in pages for item in page["matches"]] == [600, 601, 602]
+
+
+def test_search_literal_crossing_page_boundary_is_returned_once(tmp_path):
+    data = b"x" * 12 + b"needle" + b" tail"
+    output_id = make_output(tmp_path, data)
+
+    first = search(tmp_path, output_id, "needle", max_scan_bytes=14,
+                   context_bytes=0)
+    second = search(tmp_path, output_id, "needle", cursor=first["next_cursor"],
+                    max_scan_bytes=14, context_bytes=0)
+
+    assert [item["offset"] for item in first["matches"] + second["matches"]] == [12]
+    assert first["next_cursor"] == 14
+    assert second["next_cursor"] == len(data)
+
+
 @pytest.mark.parametrize("kwargs", [
     {"query": ""},
     {"query": "x", "cursor": -1},

@@ -1,6 +1,8 @@
 # 按 Codex 对话路由的 Session 原型
 
-`remote-workbench-session` 从 `0.3.0a1` 起作为 develop 的可选入口，当前目标版本为 `0.3.0a10`。它复用原有 SSH、文件、Git 和后台任务工具，保留 `remote-workbench-workspace` 与 `remote-workbench-ssh`。安装到独立 wheel 环境的日常版不会随开发源码改变。
+本文记录 `remote-workbench-session` 在 `0.3.0a10` 时作为 develop 可选入口的原型状态；该入口从 `0.3.0a1` 起开发。它复用原有 SSH、文件、Git 和后台任务工具，保留 `remote-workbench-workspace` 与 `remote-workbench-ssh`。安装到独立 wheel 环境的日常版不会随开发源码改变。
+
+本文是 a10 Session 原型的历史版本记录，不作为当前接口或默认行为说明；当前恢复、测试历史和快照行为以[后台任务恢复](lifecycle-recovery.zh-CN.md)为准。
 
 `0.3.0a5` 增加前后台任务的独立监督、进程组清理、`stop_job` 和独立清理命令。大量计算由 Agent 展示命令、并发规模和环境，等待用户明确确认后启动；普通工程操作直接执行，不要求 cgroup 或统一进程数上限。适用范围与实际清理边界见[计算审核与任务生命周期](process-safety.zh-CN.md)。本轮仅进行了本地受控测试，尚未做集群验收，也未替换 stable。
 
@@ -28,7 +30,7 @@ workspace_switch(host="myserver", cwd="/absolute/path/to/project")
 | `workspace_switch(host, cwd, expected_revision=None)` | 验证目标、创建或恢复私有副本，然后原子切换 |
 | `workspace_use_local(expected_revision=None)` | 仅清除当前聊天的活动远端绑定；保留副本、目标历史和作业来源 |
 | `workspace_history(limit=20)` | 读取本对话的目标切换历史，最新在前 |
-| `workspace_snapshot()` | 一次读取当前 Git 概况、本目标的历史测试证据及通信计量 |
+| `workspace_snapshot()`（历史原型） | 当时读取 Git 概况、本目标的历史测试证据及通信计量；当前行为以[后台任务恢复](lifecycle-recovery.zh-CN.md)为准 |
 
 切换失败时，原绑定保持不变。`expected_revision` 可拒绝基于过时状态的切换。切回相同主机和规范化模板路径会恢复已保存的副本，不重新覆盖代码；重复选择当前目标是幂等操作。已保存目录消失或发生重定位时会报错，不会静默从模板重建。
 
@@ -73,9 +75,9 @@ HTML 由运行中的 MCP 或独立查看器进程提供。更新源码后，需�
 
 MCP 结果为一份紧凑 JSON 文本，不重复发送 structuredContent。命令预览默认 2 KiB，文件、补丁和 Git diff 预览默认 4 KiB；完整内容仍保存在本机。通常无需把 SSH 包装代码读回模型上下文。记录页仍是本机 HTML，不会因远端 cwd 改变而自动成为 Codex 的原生终端或原生 Git diff。
 
-`workspace_snapshot` 中的 Git 状态是当次远端观察，包含时间、分支、HEAD 和变更文件数；超出统计界限时保留 `status_complete=false`，不把截断数据当成完整结果。它不会在普通工具调用时自动增加 Git 探测。
+【历史原型行为】`workspace_snapshot` 中的 Git 状态是当次远端观察，包含时间、分支、HEAD 和变更文件数；超出统计界限时保留 `status_complete=false`，不把截断数据当成完整结果。它不会在普通工具调用时自动增加 Git 探测。
 
-`last_test` 按目标分别保存，来源是被识别为测试命令的退出结果；超时或传输状态不明时为 unknown。它同时返回 `evidence="command_exit_only", applies_to_current_code=null`：没有做代码指纹匹配，因此历史成功不能证明当前代码仍通过。切换到另一目标不会带过去旧目标的测试结果。
+【历史原型行为】`last_test` 按目标分别保存，来源是被识别为测试命令的退出结果；超时或传输状态不明时为 unknown。它同时返回 `evidence="command_exit_only", applies_to_current_code=null`：没有做代码指纹匹配，因此历史成功不能证明当前代码仍通过。切换到另一目标不会带过去旧目标的测试结果。
 
 通信计量保存在本机 SQLite，不增加额外 MCP 调用，也不存参数或输出正文。它记录完成的响应数量、已验证参数 JSON 的 UTF-8 字节数、返回文本字节数、失败结果和耗时。重复读取仅统计同一工作区内、同一保存输出页面的相同内容；增长中的日志返回新字节不算重复。Snapshot 的计量截至本次快照响应之前，不包含 JSON-RPC 外壳、工具 schema 或实际 tokenizer 成本，不等同于任务成功率。计量故障不会把已经执行的写入误报为失败。
 

@@ -43,3 +43,31 @@ async def test_identity_only_cli_does_not_load_hosts_or_remote_tools(tmp_path):
             value = json.loads(result.content[0].text)
             assert value["identity_available"] and value["remote_execution"] is False
             assert (tmp_path / "identity-probe" / value["operation_id"] / "record.json").exists()
+
+
+async def test_compact_stdio_schema_scoping_and_reused_operation_link(tmp_path):
+    config = tmp_path / "hosts.yaml"
+    config.write_text('hosts:\n  test:\n    ssh_host: never-connect.invalid\n')
+    params = StdioServerParameters(command=sys.executable, args=[
+        "-m", "remote_workbench.session_server", "--config", str(config),
+        "--data-dir", str(tmp_path / "state"), "--viewer-port", "0", "--tool-profile", "compact"])
+    async with stdio_client(params) as (reader, writer):
+        async with ClientSession(reader, writer) as client:
+            await client.initialize()
+            tools = await client.list_tools()
+            assert len(tools.tools) == 8
+            assert "workspace_tools" in {t.name for t in tools.tools}
+            first = await client.call_tool("workspace_info", meta={"threadId": "a"})
+            assert first.structuredContent is None and len(first.content) == 1
+            link = json.loads(first.content[0].text)["operation_log"]
+            saved = await client.call_tool("workspace_tools", {"tool": "workspace_note", "arguments": {"goal": "private note"}}, meta={"threadId": "a"})
+            assert not saved.isError
+            assert "operation_log" not in json.loads(saved.content[0].text)
+            resumed = await client.call_tool("workspace_tools", {"tool": "workspace_resume"}, meta={"threadId": "a"})
+            a = json.loads(resumed.content[0].text)
+            assert a["operation_log"] == link and a["note"]["goal"] == "private note"
+            other = await client.call_tool("workspace_tools", {"tool": "workspace_resume"}, meta={"threadId": "b"})
+            b = json.loads(other.content[0].text)
+            assert b["note"] is None and b["operation_log"] != link
+            refused = await client.call_tool("exec_command", {"command": "must never run"}, meta={"threadId": "a"})
+            assert refused.isError and "no remote workspace" in refused.content[0].text

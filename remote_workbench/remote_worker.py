@@ -132,6 +132,12 @@ def apply_patch(request):
     repo = Path(os.fsdecode(top.stdout).strip())
     os.chdir(repo)
     with lock(repo / ".remote-workbench-patch"):
+        native = request["patch"].startswith("*** Begin Patch")
+        if native:
+            patch = compile_native_patch(request["patch"], repo, request.get("max_file_size", 10485760)).encode("utf-8")
+            if not patch:
+                return {"success": True, "check_only": bool(request.get("check_only")),
+                        "summary": "", "patch_sha256": sha(patch), "normalized_patch": ""}
         # Refuse paths outside the worktree using git's default path protections.
         check = subprocess.run(["git", "apply", "--check", "--whitespace=nowarn", "-"], input=patch, capture_output=True)
         if check.returncode:
@@ -141,7 +147,10 @@ def apply_patch(request):
             result = subprocess.run(["git", "apply", "--whitespace=nowarn", "-"], input=patch, capture_output=True)
             if result.returncode:
                 return {"error": "apply_failed", "message": result.stderr.decode("utf-8", "replace")}
-        return {"success": True, "check_only": bool(request.get("check_only")), "summary": summary.stdout.decode("utf-8", "replace"), "patch_sha256": sha(patch)}
+        result = {"success": True, "check_only": bool(request.get("check_only")), "summary": summary.stdout.decode("utf-8", "replace"), "patch_sha256": sha(patch)}
+        if native:
+            result["normalized_patch"] = patch.decode("utf-8")
+        return result
 
 
 def read_binary(request):
@@ -199,7 +208,9 @@ def read_lines(request):
 
 # The same supervisor owns foreground and detached workload lifecycles.
 if "supervise_task" not in globals():
-    from remote_workbench.remote_task import machine_identity, process_start, job_liveness, supervise_task
+    from remote_workbench.remote_task import machine_identity, process_start, job_liveness, supervise_task, verify_job_origin
+if "verify_job_origin" not in globals():
+    from remote_workbench.remote_task import verify_job_origin
 if "TASK_SUPERVISOR_SOURCE" not in globals():
     TASK_SUPERVISOR_SOURCE = (Path(__file__).with_name("remote_shell.py").read_text() + "\n" +
                               Path(__file__).with_name("remote_task.py").read_text())
@@ -212,6 +223,13 @@ def job(request):
     base = state_root() / "jobs"
     path = base / request["job_id"]
     if request["op"] == "job_start":
+        origin_nonce = request.get("origin_nonce")
+        if origin_nonce is not None and (not isinstance(origin_nonce, str) or
+                not re.fullmatch(r"[a-f0-9]{32}", origin_nonce)):
+            raise ValueError("Invalid job origin nonce")
+        launch_cwd = request.get("launch_cwd", os.getcwd())
+        if not isinstance(launch_cwd, str) or not launch_cwd.startswith("/") or "\x00" in launch_cwd:
+            raise ValueError("Invalid job launch cwd")
         base.mkdir(parents=True, exist_ok=True, mode=0o700)
         path.mkdir(mode=0o700)  # Exclusive: never overwrite another job.
         runner = path / "runner.py"
@@ -220,10 +238,11 @@ def job(request):
         prefix = "\x1eREMOTE_WORKBENCH_JOB_" + request["job_id"]
         markers = {name: prefix + "_" + name + "\x1f\n" for name in ("stdout", "stderr")}
         policy = request["_task_policy"]
-        settings = dict(command=request["command"], cwd=os.getcwd(), task_id=request["job_id"],
+        settings = dict(command=request["command"], cwd=os.getcwd(), actual_cwd=os.getcwd(),
+                        launch_cwd=launch_cwd, task_id=request["job_id"],
                         task_dir=str(path), markers=markers, policy=policy,
                         timeout=request.get("timeout") or policy["job_timeout"],
-                        detached=True, directory_exists=True)
+                        detached=True, directory_exists=True, origin_nonce=origin_nonce)
         script = TASK_SUPERVISOR_SOURCE + "\nsettings = " + repr(settings) + "\nraise SystemExit(supervise_task(settings))\n"
         with open(runner, "w", opener=lambda p, f: os.open(p, f, 0o600)) as output:
             output.write(script)
@@ -244,8 +263,54 @@ def job(request):
                 "node": status["node"], "pgid": status.get("pgid"), "remote_task": status}
     if not path.is_dir():
         return {"error": "job_not_found"}
+    expected_nonce = request.get("expected_origin_nonce")
+    expected_launch_cwd = request.get("expected_launch_cwd")
+    expected_actual_cwd = request.get("expected_actual_cwd")
+    expected_state_dir = request.get("expected_remote_state_dir")
+    if expected_nonce is not None:
+        if (not isinstance(expected_nonce, str) or
+                not re.fullmatch(r"[a-f0-9]{32}", expected_nonce) or
+                not isinstance(expected_launch_cwd, str) or
+                not isinstance(expected_state_dir, str)):
+            return {"error": "job_identity_unconfirmed", "job_id": request["job_id"],
+                    "running": None, "execution_state": "unknown",
+                    "state_reason": "recovery_descriptor_incomplete"}
+        if str(state_root()) != str(Path(expected_state_dir).expanduser().absolute()):
+            return {"error": "job_identity_unconfirmed", "job_id": request["job_id"],
+                    "running": None, "execution_state": "unknown",
+                    "state_reason": "remote_state_dir_mismatch"}
+        if path.is_symlink() or any((path / name).is_symlink()
+                                    for name in ("origin.json", "status.json", "exit_code",
+                                                 "stdout.log", "stderr.log")):
+            return {"error": "job_identity_unconfirmed", "job_id": request["job_id"],
+                    "running": None, "execution_state": "unknown",
+                    "state_reason": "job_identity_path_is_symlink"}
+        try:
+            origin = json.loads((path / "origin.json").read_text())
+            status = json.loads((path / "status.json").read_text())
+            exit_path = path / "exit_code"
+            exit_code = int(exit_path.read_text()) if exit_path.exists() else None
+            valid, reason, verified_running = verify_job_origin(
+                origin, status, job_id=request["job_id"], remote_state_dir=expected_state_dir,
+                expected_nonce=expected_nonce, expected_launch_cwd=expected_launch_cwd,
+                exit_code=exit_code, expected_actual_cwd=expected_actual_cwd)
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            valid, reason, verified_running = False, "origin_record_incomplete", None
+            origin = status = {}
+            exit_code = None
+        if not valid:
+            return {"error": "job_identity_unconfirmed", "job_id": request["job_id"],
+                    "running": None, "exit_code": None, "execution_state": "unknown",
+                    "state_reason": reason}
+    else:
+        origin = status = None
+        verified_running = None
     exit_path = path / "exit_code"
-    if exit_path.exists():
+    if expected_nonce is not None:
+        running = verified_running
+        exit_code = int(exit_path.read_text()) if exit_path.exists() else None
+        detail = {}
+    elif exit_path.exists():
         running, exit_code = False, int(exit_path.read_text())
         detail = {}
     else:
@@ -261,6 +326,7 @@ def job(request):
               "execution_state": "running" if running else ("finished" if exit_code is not None else "unknown"), **detail}
     if (path / "status.json").exists():
         result["remote_task"] = json.loads((path / "status.json").read_text())
+        result["job_dir"] = str(path)
         if result["remote_task"].get("cleanup_state") == "unconfirmed":
             result["execution_state"] = "unknown"
     for stream in ("stdout", "stderr"):

@@ -11,11 +11,14 @@ from mcp.server.fastmcp.exceptions import ToolError
 from mcp.server.lowlevel.server import request_ctx
 from mcp.shared.context import RequestContext
 
-from remote_workbench import audit
+from remote_workbench import audit, job_collector
+from remote_workbench import test_evidence
 from remote_workbench import session_server as session_server_module
 from remote_workbench.config import HostConfig, ServerConfig
 from remote_workbench.server import require_connection, get_executor, workspace_executor
-from remote_workbench.session_server import create_server
+from remote_workbench.session_server import (
+    _public_test_attempt, create_server,
+)
 from remote_workbench.ssh import SSHExecutor, SSHResult
 from remote_workbench.tools import commands, files, git, search, patch, audit as audit_tools
 from remote_workbench.workspace_router import SessionRouter
@@ -31,6 +34,27 @@ async def call(server, thread, name, **arguments):
         return json.loads(blocks[0].text)
     finally:
         request_ctx.reset(token)
+
+
+def test_legacy_test_attempt_projection_is_historical_and_read_only():
+    saved_observation = {
+        "attempt_id": "a" * 32, "attempt_order": 4, "test_result": "success",
+        "reliable_completion": True, "applies_to_current_code": True,
+        "before": {"digest": "same"}, "after": {"digest": "same"},
+        "observed_at": 123.0,
+    }
+    attempt = {
+        "attempt_id": "a" * 32, "attempt_order": 4, "state": "finished",
+        "process_exit_status": "success", "test_result": "success",
+        "before": saved_observation["before"], "after": saved_observation["after"],
+        "observation": saved_observation,
+    }
+    cached = _public_test_attempt(attempt, applicability=None, historical=True)
+    assert cached["applies_to_current_code"] is None
+    assert cached["historical"] is True
+    assert "observation" not in cached
+    assert saved_observation["applies_to_current_code"] is True
+    assert attempt["observation"] == saved_observation
 
 
 def router_at(path):
@@ -223,6 +247,8 @@ async def test_workspace_resume_bounds_and_pages_local_recovery_details(project,
         "operation_id": test_operation_id,
         "output_id": "pending-output",
         "status": "passed",
+        "applies_to_current_code": True,
+        "historical": False,
         "before": {
             "code": {"complete": True, "digest": "a" * 64, "scope": "bounded"},
             "config_digest": "b" * 64,
@@ -245,10 +271,16 @@ async def test_workspace_resume_bounds_and_pages_local_recovery_details(project,
     assert first["jobs_has_more"] is True
     assert first["jobs_next_offset"] == 20
     assert first["jobs_truncated"] is True
-    assert first["last_test"]["local_record_id"] == test_operation_id
-    assert "command" not in first["last_test"]
-    assert len(first["last_test"]["command_preview"]) <= 241
-    assert set(first["last_test"]["before"]["code"]) <= {
+    assert "last_test" not in first and "latest_test_attempt" not in first
+    legacy = await call(server, "a", "workspace_resume", include_legacy_test_history=True)
+    saved_test = legacy["legacy_test_history"]["last_test"]
+    assert saved_test["local_record_id"] == test_operation_id
+    assert saved_test["applies_to_current_code"] is None
+    assert saved_test["historical"] is True
+    assert saved_test["current_applicability"] == "unknown"
+    assert "command" not in saved_test
+    assert len(saved_test["command_preview"]) <= 241
+    assert set(saved_test["before"]["code"]) <= {
         "complete", "digest", "scope", "files", "bytes", "reason",
     }
     delivery = next(item for item in first["recent_delivery"] if item["id"] == delivery_id)
@@ -267,6 +299,140 @@ async def test_workspace_resume_bounds_and_pages_local_recovery_details(project,
     assert other["jobs_has_more"] is False
     with pytest.raises(ToolError, match="between 1 and 50"):
         await call(server, "a", "workspace_resume", limit=51)
+
+
+async def test_default_lifecycle_never_manages_legacy_test_evidence(project, monkeypatch):
+    router, server, source, _ = project
+    tests_dir = source / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_smoke.py").write_text(
+        "import unittest\nclass Smoke(unittest.TestCase):\n"
+        "    def test_ok(self): self.assertEqual(1 + 1, 2)\n"
+    )
+    switched = await call(server, "a", "workspace_switch", host="a", cwd=str(source))
+    state = router.registry.get(switched["workspace_id"])
+    target = WorkspaceTarget(state.target_id, state.workspace_id, state.host, state.source_cwd,
+                             state.cwd, state.project_root)
+    router.registry.save_test(state.workspace_id, state.target_id, {
+        "command": "pytest -q", "operation_id": "d" * 32, "status": "passed",
+        "applies_to_current_code": True, "before": {"code": {"digest": "legacy"}},
+    })
+    old_attempt = router.registry.begin_test_attempt(
+        state.workspace_id, target, attempt_id="e" * 32, job_id="legacy-job",
+        command="pytest -q", cwd=state.cwd, execution_kind="foreground",
+        started_at=1.0, before={"code": {"digest": "legacy"}}, revision=state.revision,
+    )
+    saved_test = router.registry.last_test(state.workspace_id, state.target_id)
+    saved_attempt = router.registry.test_attempt(state.workspace_id, old_attempt["attempt_id"])
+    def forbidden(*args, **kwargs):
+        raise AssertionError("normal execution called a legacy test-evidence helper")
+
+    legacy_methods = (
+        "last_test", "latest_test_attempt", "test_attempt_for_job", "test_attempt",
+        "begin_test_attempt", "update_test_attempt", "save_test",
+    )
+    with monkeypatch.context() as blocked:
+        for method in legacy_methods:
+            blocked.setattr(router.registry, method, forbidden)
+        for method in ("capture", "capture_target", "compare", "invalidate"):
+            blocked.setattr(test_evidence, method, forbidden)
+        blocked.setattr(session_server_module.baseline, "project_fingerprint", forbidden)
+
+        tested = await call(server, "a", "exec_command",
+                            command="python3 -m unittest discover -s tests")
+        assert "Ran 1 test" in tested["stderr"] and "OK" in tested["stderr"]
+        assert "test_evidence" not in tested and "test_attempt" not in tested
+
+        resumed = await call(server, "a", "workspace_resume")
+        assert "last_test" not in resumed and "latest_test_attempt" not in resumed
+        basic_snapshot = await call(server, "a", "workspace_snapshot")
+        assert "content_fingerprint" not in basic_snapshot
+        assert "last_test" not in basic_snapshot and "test_evidence_comparison" not in basic_snapshot
+
+        launched = await call(server, "a", "start_job",
+                              command="python3 -m unittest discover -s tests",
+                              idempotency_key="default-test-job")
+        assert launched.get("job_output_id") and "test_attempt" not in launched
+        resolved = await call(server, "a", "resolve_operation",
+                              idempotency_key="default-test-job")
+        assert resolved["job_id"] == launched["job_id"]
+        assert "test_attempt" not in resolved and "test_observation" not in resolved
+        stopped = await call(server, "a", "stop_job", job_id=launched["job_id"])
+        assert "test_attempt" not in stopped and "test_observation" not in stopped
+
+        executor = router.executor(state.host, state.cwd, state.project_root)
+        with audit.scoped_root(router.audit_dir(state.workspace_id)):
+            handle = job_collector._read_handle(
+                job_collector._handle_path(executor, launched["job_id"]))
+        assert not {"test_attempt_id", "registry_path"} & set(handle.get("origin", {}))
+
+    assert router.registry.last_test(state.workspace_id, state.target_id) == saved_test
+    assert router.registry.test_attempt(state.workspace_id, old_attempt["attempt_id"]) == saved_attempt
+    history = await call(server, "a", "workspace_resume", include_legacy_test_history=True)
+    legacy = history["legacy_test_history"]
+    assert legacy["last_test"]["applies_to_current_code"] is None
+    assert legacy["latest_test_attempt"]["applies_to_current_code"] is None
+    assert legacy["latest_test_attempt"]["historical"] is True
+    assert router.registry.last_test(state.workspace_id, state.target_id) == saved_test
+    assert router.registry.test_attempt(state.workspace_id, old_attempt["attempt_id"]) == saved_attempt
+
+    fingerprint = AsyncMock(return_value={"complete": True, "digest": "opt-in", "files": 7,
+                                         "bytes": 2048, "scope": "bounded"})
+    monkeypatch.setattr(session_server_module.baseline, "project_fingerprint", fingerprint)
+    scanned = await call(server, "a", "workspace_snapshot", scan_content=True,
+                         max_files=17, max_content_bytes=4096)
+    assert scanned["content_fingerprint"]["digest"] == "opt-in"
+    assert scanned["content_scan_budget"] == {"max_files": 17, "max_content_bytes": 4096}
+    assert fingerprint.await_count == 1
+    assert fingerprint.await_args.kwargs == {"max_files": 17, "max_bytes": 4096}
+    assert router.registry.last_test(state.workspace_id, state.target_id) == saved_test
+    assert router.registry.test_attempt(state.workspace_id, old_attempt["attempt_id"]) == saved_attempt
+
+
+async def test_writes_and_exec_leave_legacy_test_history_untouched(project, monkeypatch):
+    router, server, source, _ = project
+    subprocess.run(["git", "init", "-q", str(source)], check=True)
+    subprocess.run(["git", "-C", str(source), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(source), "-c", "user.name=Test", "-c",
+                    "user.email=test@example.invalid", "commit", "-qm", "baseline"], check=True)
+    switched = await call(server, "a", "workspace_switch", host="a", cwd=str(source))
+    workspace_id, target_id = switched["workspace_id"], switched["target_id"]
+    saved = {"command": "pytest", "operation_id": "f" * 32, "status": "passed",
+             "applies_to_current_code": True}
+    router.registry.save_test(workspace_id, target_id, saved)
+    def forbidden(*args, **kwargs):
+        raise AssertionError("write path called a legacy test-evidence helper")
+
+    with monkeypatch.context() as blocked:
+        for method in ("last_test", "latest_test_attempt", "test_attempt_for_job",
+                       "test_attempt", "begin_test_attempt", "update_test_attempt", "save_test"):
+            blocked.setattr(router.registry, method, forbidden)
+        for method in ("capture", "capture_target", "compare", "invalidate"):
+            blocked.setattr(test_evidence, method, forbidden)
+
+        written = await call(server, "a", "write_file", path="value.txt", content="written\n")
+        assert not written.get("error"), written
+
+        patched = await call(server, "a", "patch_file", path="value.txt", old="written",
+                             new="patched")
+        assert not patched.get("error"), patched
+
+        applied = await call(server, "a", "apply_patch", cwd=".", patch=(
+            "*** Begin Patch\n*** Update File: value.txt\n@@\n-patched\n+applied\n*** End Patch"
+        ))
+        assert not applied.get("error"), applied
+
+        preview = await call(server, "a", "workspace_preview", paths=["value.txt"])
+        delivered = await call(server, "a", "workspace_apply", files=preview["files"])
+        assert any(item["status"] == "applied" for item in delivered["files"]), delivered
+
+        executed = await call(server, "a", "exec_command", command=(
+            "python3 -c \"from pathlib import Path; Path('value.txt').write_text('exec-write')\""
+        ))
+        assert executed["execution_state"] == "finished"
+        assert executed["exit_code"] == 0
+
+    assert router.registry.last_test(workspace_id, target_id) == saved
 
 
 async def test_baseline_delivery_tools_list_preview_and_apply(project):
@@ -290,20 +456,22 @@ async def test_baseline_delivery_tools_list_preview_and_apply(project):
     assert (source / "value.txt").read_text() == "changed in private session\n"
 
 
-async def test_rejected_and_authentication_commands_do_not_record_test_evidence(project):
+async def test_commands_do_not_create_test_history_and_authentication_stays_rejected(project):
     router, server, source, _ = project
     switched = await call(server, "a", "workspace_switch", host="a", cwd=str(source))
     rejected = await call(server, "a", "exec_command", command="pytest -n auto")
     assert rejected["executed"] is False
-    assert "test_evidence" not in rejected
+    assert "test_evidence" not in rejected and "test_attempt" not in rejected
     assert router.registry.last_test(switched["workspace_id"], switched["target_id"]) is None
+    assert router.registry.latest_test_attempt(switched["workspace_id"], switched["target_id"]) is None
 
     secret_marker = "test-secret-marker"
     auth = await call(server, "a", "exec_command",
                       command=f"sshpass -p {secret_marker} ssh host; pytest -q")
     assert auth["executed"] is False
     assert auth["error"] == "authentication_requires_user_terminal"
-    assert "test_evidence" not in auth
+    assert "test_evidence" not in auth and "test_attempt" not in auth
+    assert router.registry.latest_test_attempt(switched["workspace_id"], switched["target_id"]) is None
     record = await call(server, "a", "audit_get", operation_id=auth["operation_id"])
     assert secret_marker not in json.dumps(record)
 
@@ -428,7 +596,7 @@ async def test_switch_waits_for_foreground_call_across_router_instances(project)
     assert switched["host"] == "b"
 
 
-async def test_job_controls_and_local_reads_bypass_foreground_lease_and_keep_origin(project, monkeypatch):
+async def test_job_controls_fail_closed_without_saved_identity_and_local_reads_bypass_lease(project, monkeypatch):
     router, _, source, other = project
 
     # The production tool list is being extended independently; ensure this
@@ -468,6 +636,15 @@ async def test_job_controls_and_local_reads_bypass_foreground_lease_and_keep_ori
     origin_snapshot = router.snapshot(router.registry.get(workspace_id), origin_target)
     origin_executor = origin_snapshot.workspace.executor
     current_executor = router.snapshot(router.registry.get(workspace_id)).workspace.executor
+    routed_targets = []
+    original_snapshot = router.snapshot
+
+    def capture_snapshot(state, target=None):
+        if target is not None:
+            routed_targets.append(target)
+        return original_snapshot(state, target)
+
+    monkeypatch.setattr(router, "snapshot", capture_snapshot)
     entered, release = asyncio.Event(), asyncio.Event()
 
     async def blocked_run(*args, **kwargs):
@@ -475,7 +652,10 @@ async def test_job_controls_and_local_reads_bypass_foreground_lease_and_keep_ori
         await release.wait()
         return SSHResult(stdout="foreground complete", stderr="", exit_code=0)
 
+    cancel_calls = []
+
     async def cancel_job(job_id):
+        cancel_calls.append(job_id)
         return {"job_id": job_id, "cancel_requested": True, "origin_host": "host-a"}
 
     def local_job_info(executor):
@@ -508,12 +688,14 @@ async def test_job_controls_and_local_reads_bypass_foreground_lease_and_keep_ori
     completed = await asyncio.wait_for(foreground, 2)
 
     stopped, status, waited, listed, record, output, matches, info = controls
-    assert stopped["cancel_requested"] is True and stopped["origin_host"] == "host-a"
-    assert status["remote_task"]["origin_host"] == "host-a"
-    assert status["execution_state"] == "running"
-    assert waited["stdout_tail"] == "prefix searchable-marker suffix\n"
-    assert waited["remote_task"]["origin_host"] == "host-a"
-    assert waited["job_output_id"] == output_id
+    # A registry-only legacy job has no saved process identity. Session job
+    # controls must refuse it instead of trusting the currently configured
+    # endpoint or an incomplete local lookup.
+    for result in (stopped, status, waited):
+        assert result["execution_state"] == "unknown"
+        assert result["state_reason"]
+    assert cancel_calls == []
+    assert origin_target in routed_targets
     assert any(item.get("id") == output_id for item in listed["records"])
     assert record["tool"] == "fixture"
     assert output["content"] == "prefix searchable-marker suffix\n"
@@ -567,6 +749,43 @@ async def test_start_job_idempotency_key_recovers_handle_without_resubmitting(pr
                    idempotency_key="request-7")
     assert len(submissions) == 1
     assert router.registry.get_job(initial["workspace_id"], first["job_id"]).host == "a"
+
+
+async def test_unverified_start_actual_cwd_is_not_persisted(project, monkeypatch):
+    router, _, source, _ = project
+
+    async def inspect(host, cwd):
+        return {"cwd": str(Path(cwd).resolve()), "repository_root": None}
+
+    async def prepare(executor, source_cwd, target_id, destination):
+        return {"cwd": destination}
+
+    monkeypatch.setattr(router, "inspect_directory", inspect)
+    monkeypatch.setattr("remote_workbench.workspace_router.prepare_project", prepare)
+    server = create_server(router, viewer_url="http://127.0.0.1:9999")
+    state = await call(server, "a", "workspace_switch", host="a", cwd=str(source))
+
+    async def mismatched_identity(executor, payload, **kwargs):
+        return {
+            "job_id": payload["job_id"],
+            "job_dir": "/untrusted/state/jobs/" + payload["job_id"],
+            "actual_cwd": "/untrusted/physical/cwd",
+            "remote_task": {"actual_cwd": "/untrusted/physical/cwd",
+                            "origin_nonce": "0" * 32},
+            "execution_state": "unknown",
+            "error": "job_identity_unconfirmed",
+            "state_reason": "origin_nonce_mismatch",
+        }
+
+    monkeypatch.setattr(commands, "edit", mismatched_identity)
+    result = await call(server, "a", "start_job", command="printf no-confirmation",
+                        idempotency_key="unverified-cwd")
+    saved = router.registry.get_job_origin(state["workspace_id"], result["job_id"])
+    operation = router.registry.get_job_operation(state["workspace_id"], "unverified-cwd")
+
+    assert result["error"] == "job_identity_unconfirmed"
+    assert saved["actual_cwd"] is None
+    assert operation.actual_cwd is None
 
 
 async def test_rejected_compute_review_can_be_resubmitted_with_the_same_idempotency_key(project, monkeypatch):
@@ -642,7 +861,7 @@ async def test_ambiguous_start_failure_is_not_retried_under_the_same_key(project
     assert "Do not restart" in recovered["warning"]
 
 
-async def test_snapshot_test_scope_and_response_byte_accounting(project):
+async def test_snapshot_metadata_and_response_byte_accounting(project):
     router, server, source, other = project
     (source / ".gitignore").write_text("__pycache__/\n.remote-workbench-state/\n")
     (source / "tests").mkdir()
@@ -668,23 +887,21 @@ async def test_snapshot_test_scope_and_response_byte_accounting(project):
     assert router.registry.metrics(workspace_id)["repeated_output_reads"] == 1
     tested = await call(server, "a", "exec_command", command="python3 -m unittest discover -s tests -v")
     assert tested["exit_code"] == 0
-    assert tested["test_evidence"]["status"] == "passed"
-    assert tested["test_evidence"]["applies_to_current_code"] is True
-    renamed = await call(server, "a", "exec_command", command="git mv value.txt renamed.txt")
-    assert renamed["exit_code"] == 0
+    assert "test_evidence" not in tested and "test_attempt" not in tested
+    # Simulate an external editor changing the private project between tools.
+    Path(state["cwd"], "value.txt").write_text("changed outside Remote Workbench\n")
     snapshot = await call(server, "a", "workspace_snapshot")
     assert snapshot["git"]["modified_files"] == 1 and snapshot["git"]["status_complete"]
-    assert snapshot["last_test"]["operation_id"] == tested["operation_id"]
-    assert snapshot["last_test"]["status"] == "passed"
-    assert snapshot["last_test"]["applies_to_current_code"] is False
-    assert snapshot["last_test"]["historical"] is True
-    assert snapshot["last_test"]["environment_verified_current"] is False
+    assert "content_fingerprint" not in snapshot
+    assert "last_test" not in snapshot and "test_evidence_comparison" not in snapshot
     assert snapshot["communication"]["recorded_responses"] > 0
     await call(server, "a", "workspace_switch", host="b", cwd=str(other))
-    assert (await call(server, "a", "workspace_snapshot"))["last_test"] is None
+    switched_snapshot = await call(server, "a", "workspace_snapshot")
+    assert "last_test" not in switched_snapshot and "content_fingerprint" not in switched_snapshot
     restarted = create_server(router_at(router.state_dir))
     await call(restarted, "a", "workspace_switch", host="a", cwd=str(source))
-    assert (await call(restarted, "a", "workspace_snapshot"))["last_test"]["operation_id"] == tested["operation_id"]
+    restarted_snapshot = await call(restarted, "a", "workspace_snapshot")
+    assert "last_test" not in restarted_snapshot and "content_fingerprint" not in restarted_snapshot
 
 
 async def test_accounting_failure_does_not_turn_a_completed_write_into_failure(project, monkeypatch):

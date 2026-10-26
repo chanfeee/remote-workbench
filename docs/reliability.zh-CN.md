@@ -28,9 +28,9 @@ Session 模式在提交前持久保存重试键、命令指纹和原始工作区
 
 ## 恢复与测试证据
 
-`workspace_note` 保存目标、约束、决定和下一步；`workspace_resume` 汇总本地保存的绑定、工作要点、作业、改动摘要和最近测试。默认返回最近 20 个作业，按 `jobs_next_offset` 传入 `job_offset` 继续，每页最多 50 个。恢复摘要属于本地缓存，不会因读取摘要而暗中连接 SSH，不能证明远端当前状态。需要实际检查时再调用相应检查工具。
+`workspace_note` 保存目标、约束、决定和下一步；`workspace_resume(include_legacy_test_history=False)` 默认只返回 binding、jobs 和 note 操作事实，不读取或修改测试缓存。显式设为 `true` 时只读返回 `legacy_test_history`，其对当前代码的适用性保持未知，且不触发 SSH 扫描。恢复摘要属于本地记录，不能证明远端当前状态；需要实际检查时再调用相应检查工具。
 
-识别出的测试命令会在执行前后收集有预算的工程内容指纹，并记录命令、目标和主机配置摘要。扫描不完整、运行期间代码变化、任务状态未知时，不宣称当前代码已验证。显式 `workspace_snapshot` 会对照当前指纹；不匹配时旧结果是历史证据。Shell 内激活的环境、安装依赖和外部输入尚未被指纹覆盖，即使代码与配置匹配也不宣称环境得到完整认证。
+`workspace_snapshot(scan_content=False, max_files=10000, max_content_bytes=67108864)` 默认执行显式元数据与 Git 检查；只有 `scan_content=true` 才在文件数和内容字节上限内计算内容指纹。快照不与旧测试结果自动比较，也不自动维护被操作项目的验证结论。科研解释、验证是否充分和测试对当前项目是否适用由调用 Agent 与用户判断。
 
 ## 权限与记录边界
 
