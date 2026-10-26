@@ -15,7 +15,7 @@ Use a Unix-like local system with Python 3.10+, OpenSSH, and [uv](https://docs.a
 
 ### 1. Install locally
 
-The following installs development source from `main`. For a fixed daily installation, see [development and stable deployment](docs/development.zh-CN.md).
+The following installs source from `main`. For a fixed daily installation, see [development and stable deployment](docs/development.zh-CN.md).
 
 ```sh
 git clone --branch main https://github.com/chanfeee/remote-workbench.git
@@ -85,7 +85,7 @@ A request can be as simple as:
 
 `source_cwd` identifies the selected source; `cwd` is where commands actually run.
 
-The `0.3.0a15` development source binds the normalized actual directory. There is no project-copy mode or copy-delivery API. Old copy bindings and jobs are unsupported; existing files and local records are left untouched. Select the actual directory to work. Older stable installations retain their installed behavior until separately upgraded.
+The `0.4.0` source binds the normalized actual directory. There is no project-copy mode or copy-delivery API. Old copy bindings and jobs are unsupported; existing files and local records are left untouched. Select the actual directory to work. Older stable installations retain their installed behavior until separately upgraded.
 
 Chat isolation applies to bindings and records; direct mode allows chats to share code. Its runtime state lives outside the code directory. Cooperative write coordination covers overlapping selected directories for updated MCP processes sharing one local state directory. It does not isolate external terminals, other controllers, or arbitrary writes outside the selected directory. See the [directory mode contract](docs/workspace-mode-contract.zh-CN.md) for scope and recovery.
 
@@ -123,7 +123,7 @@ See [images in chat](docs/images.zh-CN.md) and [job recovery](docs/lifecycle-rec
 
 `develop` is retained during migration. Branch updates do not replace an independently installed stable version or reload a running client.
 
-The direct-mode changes above, snapshot-backed edits, structured command arguments, and unified advertised tool interface are included in the `0.3.0a15` development source. Prepared edits send a snapshot ID plus new lines, avoiding copied old context and handwritten patch markers. Sequential argv batches combine checks in one supervised SSH call. Explicit switch/check/read and edit/check combinations also reduce client round trips, while returning separate edit and command outcomes. A local staging file remains an explicit compatibility option. See [editing and call boundaries](docs/tool-call-syntax.zh-CN.md). For installation and promotion, see [deployment](docs/development.zh-CN.md) and [release policy](docs/release-policy.zh-CN.md) for installation and promotion.
+The direct-mode changes above, snapshot-backed edits, structured command arguments, and unified advertised tool interface are included in the `0.4.0` source. Prepared edits send a snapshot ID plus new lines, avoiding copied old context and handwritten patch markers. Sequential argv batches combine checks in one supervised SSH call. Explicit switch/check/read and edit/check combinations also reduce client round trips, while returning separate edit and command outcomes. A local staging file remains an explicit compatibility option. See [editing and call boundaries](docs/tool-call-syntax.zh-CN.md). See [deployment](docs/development.zh-CN.md) and [release policy](docs/release-policy.zh-CN.md) for installation and promotion.
 
 Existing `remote-workbench-workspace` and `remote-workbench-ssh` installations remain compatibility entry points. The local development fixed-workspace entry also defaults to the original directory. Code, environment and result locations may be independent; session separation applies to records. See [session records and actual directories](docs/sessions.zh-CN.md). Earlier Onirika configuration is not migrated automatically.
 

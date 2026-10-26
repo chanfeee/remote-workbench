@@ -1,7 +1,7 @@
 # Changelog
 
 
-## 0.3.0a15 — actual directories and structured operations
+## 0.4.0 — actual directories and structured operations
 
 - Bind actual remote directories without project copies; remove copy preparation, copy delivery and old-copy recovery. Existing files and records are not deleted. Old-copy jobs require terminal takeover.
 - Keep chat records and immutable job origins separate from code; coordinate managed writes in known overlapping directories on one controller/shared state.

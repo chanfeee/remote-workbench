@@ -1,6 +1,6 @@
 # Validation status
 
-## Actual-directory-only development (0.3.0a15, 2026-10-26)
+## Actual-directory-only development (0.4.0, 2026-10-26)
 
 - Baseline: `develop` at `c7571b0`, preserving pre-existing uncommitted work. Session and fixed-workspace entry points use the selected actual directory. `workspace_switch(host, cwd)` no longer accepts `directory_mode`; copy preparation, copy delivery tools and copy-origin recovery exceptions have been removed.
 - Old copy files, commits, logs and stored local history are not deleted or migrated. Unsupported saved bindings require selecting the actual directory. Old copy jobs require manual terminal takeover; direct-directory jobs retain immutable origins and restart/lost-reply recovery.
