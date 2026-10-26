@@ -162,7 +162,7 @@ def make_workspace():
     return Workspace("template", "remote", "/remote/projects/template", executor)
 
 
-def test_workspace_sessions_get_unique_project_and_audit_directories(tmp_path, monkeypatch):
+def test_workspace_sessions_share_code_but_keep_unique_audit_directories(tmp_path, monkeypatch):
     monkeypatch.setenv("REMOTE_WORKBENCH_AUDIT_DIR", str(tmp_path / "audit"))
     template = make_workspace()
 
@@ -170,10 +170,8 @@ def test_workspace_sessions_get_unique_project_and_audit_directories(tmp_path, m
     second = workspace_session.WorkspaceSession(template)
 
     assert first.id != second.id
-    assert first.workspace.cwd != second.workspace.cwd
+    assert first.workspace.cwd == second.workspace.cwd == template.cwd
     assert first.audit_dir != second.audit_dir
-    assert first.workspace.cwd.endswith(f"/{first.id}/project")
-    assert second.workspace.cwd.endswith(f"/{second.id}/project")
     assert first.audit_dir == tmp_path / "audit" / "sessions" / first.id
     assert second.audit_dir == tmp_path / "audit" / "sessions" / second.id
 
@@ -187,10 +185,10 @@ async def test_remote_probe_is_opt_in_and_does_not_activate_another_session(tmp_
         stdout='{"cwd":"/remote/project","shell":"/bin/bash"}', stderr="", exit_code=0,
         output_id="probe-output",
     ))
-    prepare = AsyncMock(return_value=None)
+    prepare = AsyncMock(return_value={"cwd":template.cwd,"home":"/remote/home"})
     monkeypatch.setattr(SSHExecutor, "check_connection", connection_check)
     monkeypatch.setattr(SSHExecutor, "run_program", remote_probe)
-    monkeypatch.setattr(workspace_session, "prepare_project", prepare)
+    monkeypatch.setattr("remote_workbench.remote_directory.inspect_directory", prepare)
     servers = [create_server(template, session=session) for session in sessions]
 
     # Tool discovery and default info leave both session copies untouched.
@@ -211,15 +209,15 @@ async def test_remote_probe_is_opt_in_and_does_not_activate_another_session(tmp_
     assert first["session_prepared"] is True
     assert second["probe_performed"] is False
     assert second["session_prepared"] is False
-    assert sessions[0].workspace.cwd != sessions[1].workspace.cwd
+    assert sessions[0].workspace.cwd == sessions[1].workspace.cwd
     assert sessions[0].prepared is True
     assert sessions[1].prepared is False
-    assert connection_check.await_count == 2  # Source validation and first thread's own check.
+    assert connection_check.await_count == 1  # Explicit probe; validation is mocked.
     remote_probe.assert_awaited_once()
     prepare.assert_awaited_once()
 
 
-async def test_concurrent_ensure_ready_prepares_project_once(tmp_path, monkeypatch):
+async def test_concurrent_ensure_ready_validates_original_directory_once(tmp_path, monkeypatch):
     monkeypatch.setenv("REMOTE_WORKBENCH_AUDIT_DIR", str(tmp_path / "audit"))
     template = make_workspace()
     template.executor.check_connection = AsyncMock(return_value=(True, "connected"))
@@ -227,15 +225,16 @@ async def test_concurrent_ensure_ready_prepares_project_once(tmp_path, monkeypat
 
     async def prepare(*args):
         await asyncio.sleep(0.01)
+        return {"cwd":template.cwd,"home":"/remote/home"}
 
     prepare_project = AsyncMock(side_effect=prepare)
-    monkeypatch.setattr(workspace_session, "prepare_project", prepare_project)
+    monkeypatch.setattr("remote_workbench.remote_directory.inspect_directory", prepare_project)
 
     await asyncio.gather(session.ensure_ready(), session.ensure_ready(), session.ensure_ready())
 
-    template.executor.check_connection.assert_awaited_once_with()
+    template.executor.check_connection.assert_not_awaited()
     prepare_project.assert_awaited_once_with(
-        template.executor, template.cwd, session.id, session.workspace.cwd
+        template.executor, template.cwd
     )
     assert session.prepared is True
     saved = json.loads((session.audit_dir / "session.json").read_text())

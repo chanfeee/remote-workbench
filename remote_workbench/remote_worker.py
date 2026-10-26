@@ -9,6 +9,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import stat
 import subprocess
@@ -18,6 +19,8 @@ from contextlib import contextmanager
 
 if "login_spec" not in globals():
     from remote_workbench.remote_shell import login_spec
+if "prepared_file_patch" not in globals():
+    from remote_workbench.native_patch import compile_native_patch, prepared_file_patch
 
 
 def state_root():
@@ -132,6 +135,45 @@ def apply_patch(request):
     repo = Path(os.fsdecode(top.stdout).strip())
     os.chdir(repo)
     with lock(repo / ".remote-workbench-patch"):
+        expected_repo = request.get('expected_repository')
+        if expected_repo is not None and str(repo) != expected_repo:
+            return {'error': 'edit_target_mismatch', 'message': 'Prepared edit belongs to another repository'}
+        guards = request.get('expected_files')
+        originals = {}
+        if guards is not None:
+            if not isinstance(guards, dict) or not 1 <= len(guards) <= 100:
+                raise ValueError('Invalid prepared edit guards')
+            for name, expected in guards.items():
+                path = Path(name)
+                try:
+                    relative = path.relative_to(repo)
+                except ValueError:
+                    raise ValueError('Prepared edit path is outside the repository')
+                if (not relative.parts or any(p == '..' or p.casefold() == '.git' for p in relative.parts)
+                        or path.resolve() != path or not re.fullmatch('[a-f0-9]{64}', str(expected))):
+                    raise ValueError('Unsafe prepared edit guard')
+                fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                with os.fdopen(fd, 'rb') as source:
+                    info = os.fstat(source.fileno())
+                    maximum = request.get('max_file_size', 10485760)
+                    if not stat.S_ISREG(info.st_mode) or info.st_size > maximum:
+                        raise ValueError('Prepared edit input exceeds the file size limit')
+                    current = source.read(maximum + 1)
+                if len(current) > maximum or sha(current) != expected:
+                    return {'error': 'conflict', 'path': name, 'actual_sha256': sha(current),
+                            'message': 'File changed since the edit snapshot; read it again before editing'}
+                originals[name] = current
+        prepared = request.get('prepared_contents')
+        if prepared is not None:
+            if (not isinstance(prepared, dict) or not guards or set(prepared) != set(guards)
+                    or any(not isinstance(v, str) or len(v.encode()) > request.get('max_file_size', 10485760)
+                           for v in prepared.values())):
+                raise ValueError('Invalid prepared file contents')
+            if prepared_file_patch(originals, prepared, repo).encode() != patch:
+                raise ValueError('Prepared contents differ from the reviewed patch')
+        if not patch:
+            return {'success': True, 'check_only': bool(request.get('check_only')),
+                    'summary': '', 'patch_sha256': sha(patch), 'changed': False}
         native = request["patch"].startswith("*** Begin Patch")
         if native:
             patch = compile_native_patch(request["patch"], repo, request.get("max_file_size", 10485760)).encode("utf-8")
@@ -144,9 +186,24 @@ def apply_patch(request):
             return {"error": "patch_conflict", "message": check.stderr.decode("utf-8", "replace")}
         summary = subprocess.run(["git", "apply", "--numstat", "-"], input=patch, capture_output=True, check=True)
         if not request.get("check_only"):
-            result = subprocess.run(["git", "apply", "--whitespace=nowarn", "-"], input=patch, capture_output=True)
-            if result.returncode:
-                return {"error": "apply_failed", "message": result.stderr.decode("utf-8", "replace")}
+            if prepared is not None:
+                # Git validates the whole patch first. The existing atomic writer
+                # preserves full permissions/ownership, not just Git's executable bit.
+                applied = []
+                for name, content in prepared.items():
+                    after = content.encode('utf-8')
+                    if after != originals[name]:
+                        try:
+                            atomic_write(Path(name), after, originals[name])
+                        except (OSError, ValueError) as exc:
+                            return {'error': 'partial_apply' if applied else 'apply_failed', 'message': str(exc),
+                                    'applied_paths': applied,
+                                    'pending_paths': [p for p in prepared if p not in applied]}
+                        applied.append(name)
+            else:
+                result = subprocess.run(["git", "apply", "--whitespace=nowarn", "-"], input=patch, capture_output=True)
+                if result.returncode:
+                    return {"error": "apply_failed", "message": result.stderr.decode("utf-8", "replace")}
         result = {"success": True, "check_only": bool(request.get("check_only")), "summary": summary.stdout.decode("utf-8", "replace"), "patch_sha256": sha(patch)}
         if native:
             result["normalized_patch"] = patch.decode("utf-8")
@@ -175,6 +232,10 @@ def read_binary(request):
 
 def read_lines(request):
     path = Path(request["path"]).expanduser()
+    if request.get('for_edit'):
+        path = path.absolute()
+        if path.resolve() != path or not path.is_file():
+            raise ValueError('Prepared edits require a regular file without symbolic-link components')
     maximum = request.get("max_file_size", 10485760)
     if path.stat().st_size > maximum:
         raise ValueError("File exceeds configured size limit")
@@ -200,9 +261,16 @@ def read_lines(request):
         selected.append(value)
         used += size
         next_offset = index + 1
-    return {"content": "".join(selected).rstrip("\n"), "total_lines": total,
+    result = {"content": "".join(selected).rstrip("\n"), "total_lines": total,
             "sha256": sha(snapshot), "next_offset": next_offset,
             "truncated": truncated or total > next_offset}
+    if request.get('for_edit'):
+        top = subprocess.run(['git', '-C', str(path.parent), 'rev-parse', '--show-toplevel'], capture_output=True)
+        if top.returncode:
+            return {'error': 'not_repository', 'message': 'Prepared apply_patch requires a Git worktree; use guarded patch_file for other files'}
+        result.update(_edit_data_base64=base64.b64encode(snapshot).decode('ascii'),
+                      _edit_path=str(path), _edit_repository=os.fsdecode(top.stdout).strip())
+    return result
 
 
 

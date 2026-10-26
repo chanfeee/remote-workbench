@@ -292,6 +292,10 @@ def _value(result):
 
 
 async def _call(client: ClientSession, tool: str, arguments: dict | None = None):
+    from remote_workbench.tool_interface import TOOL_NAMES
+    if tool not in TOOL_NAMES and tool != "workspace_tools":
+        arguments = {"tool": tool, "arguments": arguments or {}}
+        tool = "workspace_tools"
     result = await client.call_tool(tool, arguments or {}, meta={"threadId": THREAD_ID})
     return _value(result)
 
@@ -554,7 +558,12 @@ async def test_lost_job_start_reply_recovers_after_real_stdio_restart_and_target
                 assert dropped[0]["response_was_present"] is True
                 assert dropped[0]["command"] == background_command
                 assert not drop_gate.exists(), "one-shot response-loss gate was not consumed"
-                expected_job_dir = Path(binding_a["project_root"]) / ".remote-workbench-state" / "jobs" / job_id
+                with sqlite3.connect(registry_path) as origin_db:
+                    runtime = origin_db.execute("SELECT remote_state_dir FROM jobs WHERE job_id=?", (job_id,)).fetchone()[0]
+                expected_job_dir = Path(runtime) / "jobs" / job_id
+                assert binding_a["directory_mode"] == "direct"
+                assert binding_a["cwd"] == str(source_a.resolve())
+                assert not Path(runtime).is_relative_to(source_a)
                 assert Path(dropped[0]["job_dir"]) == expected_job_dir
                 assert (expected_job_dir / "status.json").is_file()
                 assert (expected_job_dir / "origin.json").is_file()

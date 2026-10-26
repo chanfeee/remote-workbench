@@ -11,12 +11,18 @@ from remote_workbench.server import mcp, require_connection
 
 
 @mcp.tool()
-async def ssh_read_file(path: str, offset: int = 0, limit: int = 160, host: str | None = None, max_bytes: int = 8192) -> dict:
-    """Read a bounded range with line numbers and a hash for guarded edits. offset is 0-based."""
+async def ssh_read_file(path: str, offset: int = 0, limit: int = 160, host: str | None = None, max_bytes: int = 8192,
+                        for_edit: bool = False, local_copy: bool = True) -> dict:
+    """Read numbered lines. for_edit caches this one complete file locally and returns edit_id/local_path for guarded edits; no project copy. offset is 0-based."""
     if offset < 0 or not 1 <= limit <= 2000:
         raise ValueError("offset >= 0 and 1 <= limit <= 2000 required")
     executor = await require_connection(host)
-    return await remote_edit(executor, {"op": "read_lines", "path": path, "offset": offset, "limit": limit, "budget": max_bytes}, max_bytes=max_bytes)
+    result = await remote_edit(executor, {"op": "read_lines", "path": path, "offset": offset, "limit": limit,
+                                         "budget": max_bytes, "for_edit": for_edit}, max_bytes=max_bytes)
+    if for_edit and not result.get('error'):
+        from remote_workbench.prepared_edit import save
+        result = save(executor, result, local_copy=local_copy)
+    return result
 
 
 @mcp.tool()

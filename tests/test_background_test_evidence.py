@@ -22,13 +22,11 @@ async def eventually(predicate, timeout=12):
 
 
 def seed_legacy_history(root, project, job_id):
-    source = root / "source"
-    source.mkdir(exist_ok=True)
     registry = Registry(root / "registry.sqlite3")
     state = registry.get_or_create("legacy-background-history")
-    target = WorkspaceTarget(uuid.uuid4().hex, state.workspace_id, "a", str(source),
+    target = WorkspaceTarget(uuid.uuid4().hex, state.workspace_id, "a", str(project),
                              str(project), str(project))
-    registry.commit_switch(state.workspace_id, state.revision, target)
+    registry.commit_switch(state.workspace_id, state.revision, target, remote_state_dir=str(root / "remote-state"))
     legacy_test = {
         "command": "pytest -q", "operation_id": uuid.uuid4().hex,
         "status": "passed", "applies_to_current_code": True,

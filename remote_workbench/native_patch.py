@@ -10,7 +10,72 @@ from pathlib import Path
 import stat
 
 
+def prepared_file_patch(originals, contents, repo):
+    """Pure rendering shared by local preparation and remote verification."""
+    if set(originals) != set(contents):
+        raise ValueError('Prepared content and guard paths differ')
+    patches = []
+    for name, before in originals.items():
+        relative = Path(name).relative_to(repo)
+        if not relative.parts or any(p == '..' or p.casefold() == '.git' for p in relative.parts):
+            raise ValueError('Unsafe prepared patch path')
+        a, b = (json.dumps(prefix + relative.as_posix(), ensure_ascii=False) for prefix in ('a/', 'b/'))
+        body = list(difflib.unified_diff(before.decode('utf-8').splitlines(keepends=True),
+                                       contents[name].splitlines(keepends=True), fromfile=a, tofile=b))
+        if body:
+            patches.append('diff --git ' + a + ' ' + b + '\n' + ''.join(
+                line if line.endswith('\n') else line + '\n\\ No newline at end of file\n' for line in body))
+    return ''.join(patches)
+
+
+def validate_native_patch_syntax(text):
+    """Syntax only: no repository/file reads, shared by local and remote paths."""
+    lines = text.splitlines()
+    if not lines or lines[0] != "*** Begin Patch" or lines[-1] != "*** End Patch":
+        raise ValueError("Expected *** Begin Patch and *** End Patch")
+    position, files = 1, 0
+    while position < len(lines) - 1:
+        directive = lines[position]
+        kind = next((k for k in ("Add", "Update", "Delete")
+                     if directive.startswith("*** " + k + " File: ")), None)
+        if kind is None or not directive.split(": ", 1)[-1]:
+            raise ValueError(f"Line {position + 1}: expected Add, Update or Delete File")
+        position += 1
+        files += 1
+        if kind == "Update" and position < len(lines) - 1 and lines[position].startswith("*** Move to: "):
+            if not lines[position][len("*** Move to: "):]:
+                raise ValueError(f"Line {position + 1}: missing move destination")
+            position += 1
+        hunks = 0
+        while position < len(lines) - 1 and not lines[position].startswith("*** "):
+            if kind == "Delete":
+                raise ValueError(f"Line {position + 1}: Delete File does not take hunk lines")
+            if kind == "Add":
+                if not lines[position].startswith("+"):
+                    raise ValueError(f"Line {position + 1}: added lines must start with +")
+                position += 1
+                continue
+            if not (lines[position] == "@@" or lines[position].startswith("@@ ")):
+                raise ValueError(f"Line {position + 1}: Expected @@ before update hunk")
+            position += 1
+            hunks += 1
+            while position < len(lines) - 1:
+                line = lines[position]
+                if line.startswith("*** ") or line == "@@" or line.startswith("@@ "):
+                    break
+                if line and line[0] not in " +-":
+                    raise ValueError(f"Line {position + 1}: hunk lines must start with space, + or -; prefer edits={{path,old,new}}")
+                position += 1
+            if position < len(lines) - 1 and lines[position] == "*** End of File":
+                position += 1
+        if kind == "Update" and not hunks:
+            raise ValueError("Update needs at least one hunk")
+    if not files:
+        raise ValueError("Patch needs at least one file operation")
+
+
 def compile_native_patch(text, repo, max_file_size=10485760):
+    validate_native_patch_syntax(text)
     lines = text.splitlines()
     if not lines or lines[0] != "*** Begin Patch" or lines[-1] != "*** End Patch":
         raise ValueError("Expected *** Begin Patch and *** End Patch")
