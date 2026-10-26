@@ -12,7 +12,7 @@ Develop 的精简工具模式照常可用；Token/credits 计量仅用于手动�
 
 第一批可靠性修复、离线费用账本测试工具及后续目录模式设计见[开发任务与执行状态](docs/development-plan.zh-CN.md)和[direct/copy 契约](docs/workspace-mode-contract.zh-CN.md)。当前 develop 阶段的 MCP 记录明确目标上的命令、文件与后台任务生命周期；科研解释、验证是否充分及被操作项目的测试适用性由调用 Agent 和用户判断。费用脚本为 `python3 scripts/build_cost_ledger.py --help`，仅用于手动基准样本；费率或速度缺失时保留未知，不当作实际零费用。
 
-The `main` branch holds the validated stable source; `develop` receives changes first. Promote a fixed commit only after develop CI passes, then check main CI before updating the independent local stable installation.
+The `main` branch is the development integration branch: pull requests are merged manually after CI passes. The `stable` branch tracks validated release candidates; version tags and GitHub Releases pin each stable distribution. Existing `develop` work is retained during migration. See [branch and release policy](docs/release-policy.zh-CN.md).
 
 The `remote-workbench-session` entry point (0.3.0a10) provides: persistent workspaces routed by MCP `_meta.threadId`, atomic host/directory switching, jobs pinned to their original targets and checked against node/process identity, explicit project snapshots, and measured response bytes. Each thread keeps its own remote project copies. An identity-only diagnostic is available before enabling remote tools. This does not change an independently installed stable release; see [Session 原型与客户端联调边界](docs/session-prototype.zh-CN.md).
 
