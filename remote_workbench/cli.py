@@ -17,6 +17,7 @@ Usage:
   remote-workbench setup                                        Interactive setup wizard
   remote-workbench ssh [--config FILE]                          Run the MCP SSH server (stdio)
   remote-workbench establish [<host>] [--config FILE]           Open the SSH master for <host> (or default_host)
+                            [--background | --check]           Authenticate then detach, or check the existing master
   remote-workbench proxy [<host>] [--establish] [--source PATH] Local SSH gateway on 127.0.0.1:4242 for Claude Code
   remote-workbench proxy status                                 Show whether the gateway is running
   remote-workbench proxy stop                                   Tear down the ~/.ssh/config gateway alias
@@ -31,72 +32,63 @@ Environment:
 
 
 def _exec_establish(rest: list[str]) -> None:
-    """Open the SSH ControlMaster connection for a configured host.
-
-    Equivalent to `ssh -M -S <control_path> [-p PORT] <user>@<ssh_host>`,
-    with `~` expanded and the SSH %r/%h/%p tokens left for ssh to handle.
-    """
+    """Hand terminal authentication and the master lifecycle to OpenSSH."""
+    import argparse
     from pathlib import Path
+
+    import yaml
 
     from remote_workbench.config import load_config
 
-    alias: str | None = None
-    config_path: Path | None = None
-
-    i = 0
-    while i < len(rest):
-        a = rest[i]
-        if a in ("--config", "-c"):
-            if i + 1 >= len(rest):
-                print("remote-workbench establish: --config requires a path", file=sys.stderr)
-                sys.exit(2)
-            config_path = Path(rest[i + 1]).expanduser()
-            i += 2
-        elif a.startswith("--config="):
-            config_path = Path(a.split("=", 1)[1]).expanduser()
-            i += 1
-        elif a in ("-h", "--help"):
-            print("Usage: remote-workbench establish [<host>] [--config FILE]")
-            return
-        elif a.startswith("-"):
-            print(f"remote-workbench establish: unknown flag {a!r}", file=sys.stderr)
-            sys.exit(2)
-        else:
-            if alias is not None:
-                print("remote-workbench establish: only one host alias may be given", file=sys.stderr)
-                sys.exit(2)
-            alias = a
-            i += 1
+    parser = argparse.ArgumentParser(
+        prog="remote-workbench establish",
+        description="Open an interactive SSH shell and create a ControlMaster for MCP reuse.",
+        epilog="Passwords, Kerberos and 2FA are handled directly by SSH in your terminal.",
+        allow_abbrev=False,
+    )
+    parser.add_argument("host", nargs="?", help="configured host alias (defaults to default_host or the only host)")
+    parser.add_argument("--config", "-c", metavar="FILE", help="host YAML configuration")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--background", "-f", action="store_true",
+                      help="authenticate interactively, then keep the master in the background without a remote shell")
+    mode.add_argument("--check", action="store_true",
+                      help="check the existing master without opening a connection (exit 0 if alive)")
+    args = parser.parse_args(rest)
 
     try:
-        cfg = load_config(config_path)
+        cfg = load_config(Path(args.config).expanduser() if args.config else None)
     except FileNotFoundError as e:
         print(f"remote-workbench establish: {e}", file=sys.stderr)
         print("Run 'remote-workbench setup' first.", file=sys.stderr)
         sys.exit(1)
-
-    if alias is None:
-        alias = cfg.default_host
-        if not alias:
-            print(
-                "remote-workbench establish: no host given and no default_host in config.",
-                file=sys.stderr,
-            )
-            sys.exit(2)
+    except (OSError, ValueError, yaml.YAMLError) as e:
+        print(f"remote-workbench establish: {e}", file=sys.stderr)
+        sys.exit(1)
 
     try:
-        host = cfg.get_host(alias)
+        host = cfg.get_host(args.host)
     except ValueError as e:
         print(f"remote-workbench establish: {e}", file=sys.stderr)
         sys.exit(1)
 
-    control_path = os.path.expanduser(host.control_path)
-    argv = ["ssh", "-M", "-S", control_path]
+    # Use the same path as SSHExecutor: OpenSSH's %h expands to HostName,
+    # while the workbench's resolved %h uses the configured SSH alias.
+    argv = ["ssh", "-S", host.resolved_control_path]
+    if args.check:
+        argv += ["-O", "check"]
+    else:
+        argv += ["-M"]
+        if args.background:
+            argv += ["-f", "-N"]
     if host.port != 22:
         argv += ["-p", str(host.port)]
     argv.append(host.ssh_target)
 
-    os.execvp("ssh", argv)
+    try:
+        os.execvp("ssh", argv)
+    except OSError as e:
+        print(f"remote-workbench establish: could not run ssh: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 def _exec_proxy(rest: list[str]) -> None:

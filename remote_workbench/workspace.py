@@ -26,6 +26,8 @@ from remote_workbench.audit_web import Handler as AuditViewerHandler, handler_fo
 from remote_workbench.server import workspace_executor
 from remote_workbench.ssh import SSHExecutor
 from remote_workbench.compute_review import REVIEW_INSTRUCTIONS
+from remote_workbench.tool_interface import CALL_SOURCE_INSTRUCTIONS
+from remote_workbench.call_arguments import validate_call_arguments
 from remote_workbench.tools import commands, files, git, search, patch, audit as audit_tools
 
 
@@ -35,6 +37,13 @@ class Workspace:
     host: str
     cwd: str
     executor: SSHExecutor
+    directory_mode: str = "direct"
+
+    def __post_init__(self):
+        if self.directory_mode != 'direct':
+            raise ValueError('Only actual directories are supported')
+        from remote_workbench.remote_directory import reject_managed_copy
+        reject_managed_copy(self.cwd)
 
     @classmethod
     def load(cls, path: str | Path) -> "Workspace":
@@ -62,25 +71,29 @@ class Workspace:
         # Default shells load their own configuration. Do not carry a configured
         # host preamble/activated environment into a workspace automatically.
         config = replace(base, default_cwd=cwd, preamble="")
-        return cls(name, host, cwd, SSHExecutor(config, remote_state_dir=cwd + "/.remote-workbench-state"))
+        return cls(name, host, cwd, SSHExecutor(config))
 
     def resolve_cwd(self, cwd: str | None = None) -> str:
         if cwd is None or cwd == "":
             return self.cwd
         if "\x00" in cwd or cwd.startswith("~"):
             raise ValueError("cwd must be absolute or relative to the workspace; use an absolute home path")
-        return posixpath.normpath(posixpath.join(self.cwd, cwd))
+        resolved = posixpath.normpath(posixpath.join(self.cwd, cwd))
+        if self.directory_mode == 'direct':
+            from remote_workbench.remote_directory import reject_managed_copy
+            reject_managed_copy(resolved)
+        return resolved
 
 
 # Short names and descriptions avoid repeating SSH setup and host parameters in
 # every model-facing schema. Original tool validation/audit code remains shared.
 TOOLS = [
-    ("exec_command", commands.ssh_run, "Execute in the remote workspace. Each call starts a fresh default login shell; max_bytes bounds returned output. trace saves expanded commands."),
-    ("read_file", files.ssh_read_file, "Read remote UTF-8 lines, numbered, with a SHA256 for guarded edits. offset is zero-based; limit/max_bytes bound output."),
+    ("exec_command", commands.ssh_run, "Execute shell text or an argv array in the remote workspace. Prefer arrays for literal arguments (no shell interpolation); strings support pipes/activation. Fresh account login shell each call; max_bytes bounds output."),
+    ("read_file", files.ssh_read_file, "Read numbered UTF-8 lines. for_edit=true returns edit_id/local_path from one complete file snapshot for guarded edits. offset is zero-based; limit/max_bytes bound the preview."),
     ("fetch_image", files.ssh_fetch_image, "Fetch a remote PNG/JPG/PDF/SVG to a private local cache. PDF page is 1-based. Show returned image_markdown in chat; paths and metadata only, no base64. PDF/SVG previews require the local images extra."),
     ("write_file", files.ssh_write_file, "Atomically write remote UTF-8 content. Optional expected_sha256 rejects stale edits."),
     ("patch_file", files.ssh_patch_file, "Apply unique old/new replacements, or sequential edits=[{old,new}], remotely. Optional expected_sha256 and check_only; returns this edit's diff."),
-    ("apply_patch", patch.ssh_apply_patch, "Apply *** Begin Patch context format (Add/Update/Delete File; @@ hunks), or unified Git diff. Update existing files together in one patch; do not delete first to rewrite. No context-format line counts. Paths use the repo root. check_only validates without writing."),
+    ("apply_patch", patch.ssh_apply_patch, "Apply patch text or an array of lines: *** Begin Patch context format or unified Git diff. Prefer line arrays; no join/escaping wrapper needed. Update existing files in place. Paths use repo root; check_only validates without writing."),
     ("list_dir", files.ssh_list_dir, "List remote entries. Relative paths start at the workspace root."),
     ("grep", search.ssh_grep, "Search remote file contents by regex, with bounded results."),
     ("find_files", search.ssh_find_files, "Find remote paths by filename glob, type and depth, with bounded results."),
@@ -97,7 +110,7 @@ TOOLS = [
 ]
 
 
-def bind_tool(workspace: Workspace, name: str, function, description: str, *, workspace_provider=None):
+def bind_tool(workspace: Workspace, name: str, function, description: str, *, workspace_provider=None, session=None):
     signature = inspect.signature(function, eval_str=True)
     parameters = [p.replace(default=".") if p.name == "cwd" else p
                   for p in signature.parameters.values() if p.name != "host"]
@@ -110,14 +123,38 @@ def bind_tool(workspace: Workspace, name: str, function, description: str, *, wo
         # to smuggle a different host past the public schema.
         bound = public_signature.bind(**kwargs)
         arguments = dict(bound.arguments)
+        validate_call_arguments(name, arguments)
         active_workspace = workspace_provider() if workspace_provider else workspace
+        if active_workspace.directory_mode == 'direct' and isinstance(arguments.get('path'), str):
+            from remote_workbench.remote_directory import reject_managed_copy
+            reject_managed_copy(posixpath.join(active_workspace.cwd, arguments['path']))
         if "host" in signature.parameters:
             arguments["host"] = active_workspace.host
         if "cwd" in signature.parameters:
             arguments["cwd"] = active_workspace.resolve_cwd(arguments.get("cwd"))
         token = workspace_executor.set((active_workspace.host, active_workspace.executor))
         try:
-            return await function(**arguments)
+            claims = session.resources if session is not None else None
+            if claims is not None and name == 'apply_patch' and arguments.get('edits'):
+                from remote_workbench.edit_spec import prepared_edits
+                if prepared_edits(arguments['edits']):
+                    from remote_workbench.prepared_edit import normalize
+                    normalize(arguments, active_workspace.executor)
+            claim = None
+            if claims is not None and name in {'exec_command', 'start_job', 'write_file', 'patch_file', 'apply_patch'} and not arguments.get('check_only'):
+                declared = active_workspace.resolve_cwd(arguments.get('cwd'))
+                root = posixpath.commonpath([active_workspace.cwd, declared])
+                if isinstance(arguments.get('path'), str):
+                    root = posixpath.commonpath([root, posixpath.dirname(posixpath.normpath(posixpath.join(declared, arguments['path'])))])
+                if name == 'apply_patch' and arguments.get('expected_files'):
+                    root = posixpath.commonpath([root, *[posixpath.dirname(p) for p in arguments['expected_files']]])
+                claim = claims.acquire(active_workspace.executor.config.ssh_target, root, session.id, name)
+            result = await function(**arguments)
+            if claim:
+                claims.finish(claim, result, background=name == 'start_job', shell=name == 'exec_command')
+            elif claims is not None and name in {'job_status', 'job_wait', 'stop_job'}:
+                claims.reconcile(session.id, arguments['job_id'], result)
+            return result
         finally:
             workspace_executor.reset(token)
 
@@ -201,20 +238,18 @@ def create_server(workspace: Workspace, *, viewer_url: str | None = None, sessio
         "Do not read image bytes/base64 through text tools; use preview_path with native image viewing only for analysis. "
         "On SSH failure stop and report; never fall back to local project execution. "
         "This is a default directory, not a filesystem sandbox."
-        + REVIEW_INSTRUCTIONS
+        + CALL_SOURCE_INSTRUCTIONS + REVIEW_INSTRUCTIONS
         + (f" Local audit viewer: {viewer_url}. Every tool result supplies operation_log. "
            "Whenever you use these tools, include its Markdown link with the exact bold title "
            "'Remote Workbench 操作记录' in your user-facing update and final reply. "
            "Use the returned link directly; no separate workspace_info call is needed for it."
            if viewer_url else "")
-        + (" This MCP session has its own project copy, records, outputs and jobs. "
-           f"The original project {source_workspace.cwd} is a template; use the session cwd above. "
-           "Do not reuse IDs or project paths from other sessions."
+        + (" Session records and jobs are separate; code stays in the configured actual directory. "
            if session is not None else "")
     ))
 
     async def workspace_info(probe: bool = False) -> dict[str, Any]:
-        """Report local configuration metadata; probe SSH and prepare a session copy only when requested."""
+        """Report local configuration metadata; probe SSH and validate the selected directory only when requested."""
         active_workspace = session.workspace if session is not None else workspace
         result = {"name": active_workspace.name, "host": active_workspace.host, "cwd": active_workspace.cwd,
                   "control": "local", "execution": "remote", "connected": None,
@@ -223,7 +258,8 @@ def create_server(workspace: Workspace, *, viewer_url: str | None = None, sessio
         if viewer_url is not None:
             result["viewer_url"] = viewer_url
         if session is not None:
-            result.update(source_cwd=source_workspace.cwd, project_isolated=True,
+            result.update(source_cwd=source_workspace.cwd, project_isolated=False,
+                          directory_mode=session.directory_mode,
                           session_id=session.id, session_prepared=bool(session.prepared))
         if not probe:
             return result
@@ -262,7 +298,8 @@ def create_server(workspace: Workspace, *, viewer_url: str | None = None, sessio
             "git_diff": 4096,
         }.get(name)
         tool = bind_tool(workspace, name, function, description,
-                         workspace_provider=(lambda: session.workspace) if session is not None else None)
+                         workspace_provider=(lambda: session.workspace) if session is not None else None,
+                         session=session)
         server.tool(structured_output=False)(_workspace_response(
             tool, default_max_bytes, viewer_url=viewer_url, session=session,
             prepare_session=name not in {"read_output", "search_output", "job_wait", "audit_get", "audit_list"}))

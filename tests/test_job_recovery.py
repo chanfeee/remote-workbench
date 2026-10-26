@@ -221,11 +221,11 @@ def test_registry_persists_original_alias_endpoint_paths_and_verified_cwd(tmp_pa
     registry_path = tmp_path / "registry.sqlite3"
     registry = Registry(registry_path)
     state = registry.get_or_create("thread")
-    target = WorkspaceTarget("b" * 32, state.workspace_id, "a", str(tmp_path / "source"),
+    target = WorkspaceTarget("b" * 32, state.workspace_id, "a", str(tmp_path / "project"),
                              str(tmp_path / "project"), str(tmp_path / "project"))
-    registry.commit_switch(state.workspace_id, 0, target)
+    registry.commit_switch(state.workspace_id, 0, target, remote_state_dir=str(tmp_path / "remote-state"))
     launch_cwd = str(tmp_path / "project" / "link")
-    remote_state_dir = str(tmp_path / "project" / ".remote-workbench-state")
+    remote_state_dir = str(tmp_path / "remote-state")
     operation, created = registry.reserve_job_operation(
         state.workspace_id, "request", target, "job", "f" * 64,
         origin_nonce="c" * 32, launch_cwd=launch_cwd,

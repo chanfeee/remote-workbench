@@ -34,3 +34,6 @@ CLAUDE.md
 .claude/
 .remote-workbench-audit/
 .remote-workbench-state/
+
+# Private experiment reports belong in .local/, never in public source.
+/docs/reports/

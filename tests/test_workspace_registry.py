@@ -10,7 +10,7 @@ from remote_workbench.workspace_registry import Registry, RevisionConflict, Work
 
 def target(state, host="a", source="/source"):
     key = uuid.uuid4().hex
-    return WorkspaceTarget(key, state.workspace_id, host, source, f"/copies/{key}/project", f"/copies/{key}/project")
+    return WorkspaceTarget(key, state.workspace_id, host, source, source, source)
 
 
 def test_restart_recovers_identity_target_and_history(tmp_path):
@@ -21,17 +21,17 @@ def test_restart_recovers_identity_target_and_history(tmp_path):
     assert first.host is None and first.revision == 0
     assert first.workspace_id != second.workspace_id
     a = target(first)
-    bound = registry.commit_switch(first.workspace_id, 0, a)
+    bound = registry.commit_switch(first.workspace_id, 0, a, remote_state_dir="/runtime/unit-test")
     other = target(bound, "b", "/other")
-    changed = registry.commit_switch(first.workspace_id, 1, other)
+    changed = registry.commit_switch(first.workspace_id, 1, other, remote_state_dir="/runtime/unit-test")
     restarted = Registry(path)
     assert restarted.get_or_create("thread-a") == changed
     assert restarted.get_or_create("thread-b") == second
     assert restarted.find_target(first.workspace_id, "a", "/source") == a
-    restored = restarted.commit_switch(first.workspace_id, 2, a)
+    restored = restarted.commit_switch(first.workspace_id, 2, a, remote_state_dir="/runtime/unit-test")
     assert restored.cwd == bound.cwd and restored.revision == 3
     assert [v["revision"] for v in restarted.history(first.workspace_id)] == [3, 2, 1]
-    assert restarted.commit_switch(first.workspace_id, 3, a) == restored
+    assert restarted.commit_switch(first.workspace_id, 3, a, remote_state_dir="/runtime/unit-test") == restored
     assert os.stat(path).st_mode & 0o777 == 0o600
 
 
@@ -41,7 +41,7 @@ def test_two_instances_do_not_silently_overwrite_revision(tmp_path):
     state = registry.get_or_create("thread")
     def commit(host):
         try:
-            return Registry(path).commit_switch(state.workspace_id, 0, target(state, host))
+            return Registry(path).commit_switch(state.workspace_id, 0, target(state, host), remote_state_dir="/runtime/unit-test")
         except RevisionConflict:
             return None
     with ThreadPoolExecutor(max_workers=2) as pool:
@@ -56,7 +56,7 @@ def test_clear_binding_is_atomic_and_preserves_targets_history_and_job_origins(t
     registry = Registry(path)
     state = registry.get_or_create("thread")
     original = target(state)
-    bound = registry.commit_switch(state.workspace_id, 0, original)
+    bound = registry.commit_switch(state.workspace_id, 0, original, remote_state_dir="/runtime/unit-test")
     registry.register_job(state.workspace_id, "origin-job", original)
 
     local = registry.clear_binding(state.workspace_id, expected_revision=bound.revision)
@@ -77,7 +77,7 @@ def test_clear_binding_is_atomic_and_preserves_targets_history_and_job_origins(t
         registry.clear_binding(state.workspace_id, bound.revision)
     assert registry.get(state.workspace_id) == local
 
-    restored = registry.commit_switch(state.workspace_id, local.revision, original)
+    restored = registry.commit_switch(state.workspace_id, local.revision, original, remote_state_dir="/runtime/unit-test")
     assert restored.host == original.host and restored.cwd == original.cwd
     assert restored.revision == local.revision + 1
     assert registry.get_job(state.workspace_id, "origin-job") == original
@@ -88,9 +88,9 @@ def test_job_origin_cannot_move_or_cross_workspaces(tmp_path):
     state = registry.get_or_create("a")
     other = registry.get_or_create("b")
     a, b = target(state), target(state, "b")
-    registry.commit_switch(state.workspace_id, 0, a)
+    registry.commit_switch(state.workspace_id, 0, a, remote_state_dir="/runtime/unit-test")
     registry.register_job(state.workspace_id, "same-id", a)
-    registry.commit_switch(state.workspace_id, 1, b)
+    registry.commit_switch(state.workspace_id, 1, b, remote_state_dir="/runtime/unit-test")
     assert registry.get_job(state.workspace_id, "same-id") == a
     with pytest.raises(ValueError, match="different target"):
         registry.register_job(state.workspace_id, "same-id", b)
@@ -186,11 +186,11 @@ def test_saved_target_is_immutable_and_conflict_leaves_history_unchanged(tmp_pat
     registry = Registry(tmp_path / "registry.sqlite3")
     state = registry.get_or_create("thread")
     original = target(state)
-    bound = registry.commit_switch(state.workspace_id, 0, original)
+    bound = registry.commit_switch(state.workspace_id, 0, original, remote_state_dir="/runtime/unit-test")
     with pytest.raises(ValueError, match="immutable"):
-        registry.commit_switch(state.workspace_id, 1, replace(original, cwd="/replacement"))
+        registry.commit_switch(state.workspace_id, 1, replace(original, cwd="/replacement"), remote_state_dir="/runtime/unit-test")
     with pytest.raises(RevisionConflict):
-        registry.commit_switch(state.workspace_id, 0, target(state, "b"))
+        registry.commit_switch(state.workspace_id, 0, target(state, "b"), remote_state_dir="/runtime/unit-test")
     assert registry.get(state.workspace_id) == bound
     assert len(registry.history(state.workspace_id)) == 1
 
@@ -200,7 +200,7 @@ def test_test_attempts_persist_launch_order_and_cas_reliable_observations(tmp_pa
     registry = Registry(path)
     state = registry.get_or_create("thread")
     origin = target(state)
-    registry.commit_switch(state.workspace_id, 0, origin)
+    registry.commit_switch(state.workspace_id, 0, origin, remote_state_dir="/runtime/unit-test")
     before = {"code": {"complete": True, "digest": "same"}, "config_digest": "cfg"}
 
     older = registry.begin_test_attempt(

@@ -3,6 +3,8 @@ import os
 import re
 import shlex
 
+from remote_workbench.call_arguments import command_text
+
 
 def authentication_command(command):
     """Recognize common wrappers around an explicit ``sshpass`` invocation.
@@ -13,6 +15,10 @@ def authentication_command(command):
     words and a short list of common prefix utilities without mistaking a
     search or echo argument such as ``rg sshpass README`` for authentication.
     """
+    if isinstance(command, dict):
+        return any(authentication_command(argv) for argv in command.get('commands', []))
+    if isinstance(command, list):
+        command = command_text(command)
     try:
         lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|()\n')
         lexer.whitespace = ' \t\r'

@@ -1,5 +1,15 @@
 # Changelog
 
+
+## 0.3.0a15 — actual directories and structured operations
+
+- Bind actual remote directories without project copies; remove copy preparation, copy delivery and old-copy recovery. Existing files and records are not deleted. Old-copy jobs require terminal takeover.
+- Keep chat records and immutable job origins separate from code; coordinate managed writes in known overlapping directories on one controller/shared state.
+- Add snapshot-backed guarded edits, literal argv calls, sequential command batches and explicit switch/read and edit/check combinations.
+- Preserve manual OpenSSH authentication, supervised cancellation, bounded output, local audit records and explicit-only project fingerprinting.
+- Make the default README English and provide a Chinese version. Keep personal reports and runtime configuration out of source distributions.
+- Validation: 677 local tests passed before publication preparation; CI and installed-client verification are separate checks. Independent stable installations are unchanged.
+
 ## 0.3.0a14 (develop)
 
 - Compress large remote Python bootstrap source before base64 encoding so nested worker/supervisor commands stay below Linux's single-argument size limit. Preserve the existing stdin, login-shell and supervision protocols.

@@ -1,6 +1,6 @@
 [project]
 name = "remote-workbench"
-version = "0.3.0a14"
+version = "0.3.0a15"
 description = "Local MCP control for remote SSH workspaces with bounded output and readable audit diffs"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -43,6 +43,8 @@ packages = ["remote_workbench"]
 artifacts = ["remote_workbench/scripts/*.sh"]
 
 [tool.hatch.build.targets.sdist]
+# Defense in depth: Git tracking or a broad docs include must not ship local reports.
+exclude = ["/docs/reports", "/.local", "/.codex"]
 include = [
     "/remote_workbench",
     "/tests",
@@ -53,6 +55,7 @@ include = [
     "/CHANGELOG.md",
     "/LICENSE",
     "/README.md",
+    "/README.zh-CN.md",
     "/README.upstream.md",
     "/UPSTREAM.md",
     "/VALIDATION.md",

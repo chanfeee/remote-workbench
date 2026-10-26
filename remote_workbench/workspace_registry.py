@@ -98,18 +98,11 @@ class Registry:
                            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                        )"""
                 )
-                db.execute(
-                    """CREATE TABLE IF NOT EXISTS targets (
-                           target_id TEXT PRIMARY KEY,
-                           workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id)
-                               ON DELETE CASCADE,
-                           host TEXT NOT NULL,
-                           source_cwd TEXT NOT NULL,
-                           cwd TEXT,
-                           project_root TEXT,
-                           UNIQUE(workspace_id, host, source_cwd)
-                       )"""
-                )
+                db.execute("""CREATE TABLE IF NOT EXISTS direct_targets (
+                    target_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL,
+                    host TEXT NOT NULL, source_cwd TEXT NOT NULL, cwd TEXT NOT NULL,
+                    project_root TEXT NOT NULL, remote_state_dir TEXT NOT NULL,
+                    UNIQUE(workspace_id, host, source_cwd))""")
                 db.execute(
                     """CREATE TABLE IF NOT EXISTS target_history (
                            history_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -340,19 +333,32 @@ class Registry:
     ) -> WorkspaceTarget | None:
         with self._connection() as db:
             row = db.execute(
-                """SELECT * FROM targets
+                """SELECT * FROM direct_targets
                    WHERE workspace_id = ? AND host = ? AND source_cwd = ?""",
                 (workspace_id, host, source_cwd),
             ).fetchone()
         return self._target(row) if row is not None else None
+
+    def directory_mode(self, target_id: str | None) -> str | None:
+        if not target_id:
+            return None
+        return "direct" if self.direct_state_dir(target_id) else None
+
+    def direct_state_dir(self, target_id: str) -> str | None:
+        with self._connection() as db:
+            row = db.execute("SELECT remote_state_dir FROM direct_targets WHERE target_id=?", (target_id,)).fetchone()
+        return row[0] if row else None
 
     def commit_switch(
         self,
         workspace_id: str,
         expected_revision: int,
         target: WorkspaceTarget,
+        *, remote_state_dir: str,
     ) -> WorkspaceState:
         self._validate_target(workspace_id, target)
+        if (not remote_state_dir or not remote_state_dir.startswith("/")):
+            raise ValueError("Direct targets require an absolute runtime state directory")
         with self._transaction() as db:
             row = db.execute(
                 "SELECT * FROM workspaces WHERE workspace_id = ?", (workspace_id,)
@@ -367,12 +373,12 @@ class Registry:
                 )
 
             existing = db.execute(
-                """SELECT * FROM targets
+                """SELECT * FROM direct_targets
                    WHERE workspace_id = ? AND host = ? AND source_cwd = ?""",
                 (workspace_id, target.host, target.source_cwd),
             ).fetchone()
             canonical_target_id = existing["target_id"] if existing else target.target_id
-            if existing is not None and self._target(existing) != target:
+            if existing is not None and (self._target(existing) != target or existing["remote_state_dir"] != remote_state_dir):
                 raise ValueError("An existing target is immutable; resume its saved project directory")
 
             # Re-selecting the exact current target is an idempotent no-op:
@@ -389,11 +395,11 @@ class Registry:
             if existing is None:
                 try:
                     db.execute(
-                        """INSERT INTO targets
-                           (target_id, workspace_id, host, source_cwd, cwd, project_root)
-                           VALUES (?, ?, ?, ?, ?, ?)""",
+                        """INSERT INTO direct_targets
+                           (target_id, workspace_id, host, source_cwd, cwd, project_root, remote_state_dir)
+                           VALUES (?, ?, ?, ?, ?, ?, ?)""",
                         (target.target_id, workspace_id, target.host, target.source_cwd,
-                         target.cwd, target.project_root),
+                         target.cwd, target.project_root, remote_state_dir),
                     )
                 except sqlite3.IntegrityError as exc:
                     raise ValueError("Target ID is already in use") from exc

@@ -65,8 +65,10 @@ async def test_schema_context_injection_and_missing_identity_fail_closed(tmp_pat
     router = router_at(tmp_path)
     server = create_server(router)
     tools = await server.list_tools()
-    assert len(tools) >= 20
-    assert "resolve_operation" in {tool.name for tool in tools}
+    assert len(tools) == 8
+    assert "workspace_tools" in {tool.name for tool in tools}
+    advanced = await call(server, "catalog", "workspace_tools", tool="describe", arguments={"name":"resolve_operation"})
+    assert advanced["name"] == "resolve_operation"
     for tool in tools:
         fields = tool.inputSchema["properties"]
         assert not {"ctx", "thread_id", "threadId", "workspace_id", "session_id"} & fields.keys()
@@ -139,7 +141,7 @@ async def test_local_default_switches_back_to_saved_remote_target_and_keeps_job_
     for name, arguments in (
         ("exec_command", {"command": "pwd"}),
         ("read_file", {"path": "value.txt"}),
-        ("workspace_changes", {}),
+        ("workspace_snapshot", {}),
     ):
         with pytest.raises(ToolError, match="no remote workspace"):
             await call(server, "a", name, **arguments)
@@ -177,8 +179,8 @@ async def test_workspace_use_local_is_revision_guarded_and_idempotent(project):
 async def test_history_limit_schema_and_validation(tmp_path):
     router = router_at(tmp_path)
     server = create_server(router)
-    tool = next(tool for tool in await server.list_tools() if tool.name == "workspace_history")
-    limit = tool.inputSchema["properties"]["limit"]
+    tool = await call(server, "catalog", "workspace_tools", tool="describe", arguments={"name":"workspace_history"})
+    limit = tool["inputSchema"]["properties"]["limit"]
     assert limit["type"] == "integer"
     assert limit["default"] == 20
     assert (await call(server, "a", "workspace_history", limit=0))["targets"] == []
@@ -195,7 +197,7 @@ async def test_workspace_resume_and_note_are_local_and_thread_scoped(project, mo
     target = WorkspaceTarget(state.target_id, workspace_id, state.host, state.source_cwd,
                              state.cwd, state.project_root)
     router.registry.register_job(workspace_id, "resume-job", target)
-    executor = router.executor(state.host, state.cwd, state.project_root)
+    executor = router.snapshot(state).workspace.executor
     monkeypatch.setattr(executor, "job_local_info", lambda job_id: {
         "job_id": job_id, "job_output_id": "b" * 32, "running": False, "exit_code": 0,
         "execution_state": "finished", "sync_state": "complete", "stdout_bytes": 14,
@@ -236,12 +238,6 @@ async def test_workspace_resume_bounds_and_pages_local_recovery_details(project,
             kind="tool", tool="exec_command", host=state.host, cwd=state.cwd,
             status="finished", command="pytest",
         )
-        delivery_id = audit.create(
-            kind="tool", tool="workspace_preview", host=state.host, cwd=state.cwd,
-            status="finished", delivery_result={
-                "files": [{"path": f"file-{index:02d}.py", "change": "modified"} for index in range(25)]
-            },
-        )
     router.registry.save_test(workspace_id, state.target_id, {
         "command": "pytest " + ("--verbose " * 2000),
         "operation_id": test_operation_id,
@@ -260,7 +256,7 @@ async def test_workspace_resume_bounds_and_pages_local_recovery_details(project,
             "observed_at": 2.0,
         },
     })
-    executor = router.executor(state.host, state.cwd, state.project_root)
+    executor = router.snapshot(state).workspace.executor
     monkeypatch.setattr(executor, "job_local_info",
                         lambda job_id: {"job_id": job_id, "running": None}, raising=False)
     monkeypatch.setattr(executor, "check_connection", AsyncMock(side_effect=AssertionError("SSH check")))
@@ -283,11 +279,6 @@ async def test_workspace_resume_bounds_and_pages_local_recovery_details(project,
     assert set(saved_test["before"]["code"]) <= {
         "complete", "digest", "scope", "files", "bytes", "reason",
     }
-    delivery = next(item for item in first["recent_delivery"] if item["id"] == delivery_id)
-    assert len(delivery["files"]) == 20
-    assert delivery["files_total"] == 25
-    assert delivery["truncated"] is True
-
     second = await call(server, "a", "workspace_resume", job_offset=first["jobs_next_offset"], limit=50)
     all_ids = [item["job_id"] for item in first["jobs"] + second["jobs"]]
     assert len(all_ids) == 23 and len(set(all_ids)) == 23
@@ -340,7 +331,9 @@ async def test_default_lifecycle_never_manages_legacy_test_evidence(project, mon
 
         tested = await call(server, "a", "exec_command",
                             command="python3 -m unittest discover -s tests")
-        assert "Ran 1 test" in tested["stderr"] and "OK" in tested["stderr"]
+        assert tested["test_summary"]["tests_run"] == 1
+        raw = await call(server, "a", "read_output", output_id=tested["output_id"], stream="stderr", max_bytes=1024)
+        assert "Ran 1 test" in raw["content"] and "OK" in raw["content"]
         assert "test_evidence" not in tested and "test_attempt" not in tested
 
         resumed = await call(server, "a", "workspace_resume")
@@ -360,7 +353,7 @@ async def test_default_lifecycle_never_manages_legacy_test_evidence(project, mon
         stopped = await call(server, "a", "stop_job", job_id=launched["job_id"])
         assert "test_attempt" not in stopped and "test_observation" not in stopped
 
-        executor = router.executor(state.host, state.cwd, state.project_root)
+        executor = router.snapshot(state).workspace.executor
         with audit.scoped_root(router.audit_dir(state.workspace_id)):
             handle = job_collector._read_handle(
                 job_collector._handle_path(executor, launched["job_id"]))
@@ -417,14 +410,10 @@ async def test_writes_and_exec_leave_legacy_test_history_untouched(project, monk
                              new="patched")
         assert not patched.get("error"), patched
 
-        applied = await call(server, "a", "apply_patch", cwd=".", patch=(
+        applied = await call(server, "a", "workspace_tools", tool="apply_patch", arguments={"cwd":".", "patch":(
             "*** Begin Patch\n*** Update File: value.txt\n@@\n-patched\n+applied\n*** End Patch"
-        ))
+        )})
         assert not applied.get("error"), applied
-
-        preview = await call(server, "a", "workspace_preview", paths=["value.txt"])
-        delivered = await call(server, "a", "workspace_apply", files=preview["files"])
-        assert any(item["status"] == "applied" for item in delivered["files"]), delivered
 
         executed = await call(server, "a", "exec_command", command=(
             "python3 -c \"from pathlib import Path; Path('value.txt').write_text('exec-write')\""
@@ -435,25 +424,6 @@ async def test_writes_and_exec_leave_legacy_test_history_untouched(project, monk
     assert router.registry.last_test(workspace_id, target_id) == saved
 
 
-async def test_baseline_delivery_tools_list_preview_and_apply(project):
-    router, server, source, _ = project
-    switched = await call(server, "a", "workspace_switch", host="a", cwd=str(source))
-    private_file = Path(switched["cwd"], "value.txt")
-    private_file.write_text("changed in private session\n")
-
-    changes = await call(server, "a", "workspace_changes")
-    assert [entry["path"] for entry in changes["files"]] == ["value.txt"]
-    assert "diff" not in changes["files"][0]
-
-    preview = await call(server, "a", "workspace_preview", paths=["value.txt"])
-    assert "-original" in preview["files"][0]["diff"]
-    assert "+changed in private session" in preview["files"][0]["diff"]
-    assert preview["operation_id"]
-    assert preview["diff_output_id"] == preview["operation_id"]
-
-    applied = await call(server, "a", "workspace_apply", files=preview["files"])
-    assert applied["files"][0]["status"] == "applied"
-    assert (source / "value.txt").read_text() == "changed in private session\n"
 
 
 async def test_commands_do_not_create_test_history_and_authentication_stays_rejected(project):
@@ -494,20 +464,20 @@ async def project(local, monkeypatch):
     return router, server, source, other
 
 
-async def test_threads_private_copies_switch_restart_and_guarded_edits(project):
+async def test_threads_share_selected_directory_keep_records_and_guarded_edits(project):
     router, server, source, other = project
     a, b = await asyncio.gather(*(call(server, thread, "workspace_switch", host="a", cwd=str(source)) for thread in ("a", "b")))
-    assert a["cwd"] != b["cwd"]
+    assert a["cwd"] == b["cwd"] == str(source)
     assert a["workspace_id"] != b["workspace_id"]
     assert a["revision"] == b["revision"] == 1
-    assert f"/w/{a['workspace_id']}/?id=" in a["operation_log"]
+    assert f"/w/{a['workspace_id']}/)" in a["operation_log"]
     read = await call(server, "a", "read_file", path="value.txt")
     changed = await call(server, "a", "patch_file", path="value.txt", old="original", new="edited", expected_sha256=read["sha256"])
     assert not changed.get("error"), changed
     conflict = await call(server, "a", "patch_file", path="value.txt", old="edited", new="stale", expected_sha256=read["sha256"])
     assert conflict.get("error")
-    assert (source / "value.txt").read_text() == "original\n"
-    assert Path(b["cwd"], "value.txt").read_text() == "original\n"
+    assert (source / "value.txt").read_text() == "edited\n"
+    assert Path(b["cwd"], "value.txt").read_text() == "edited\n"
     moved = await call(server, "a", "workspace_switch", host="b", cwd=str(other), expected_revision=1)
     assert moved["host"] == "b" and moved["revision"] == 2
     assert (await call(server, "b", "workspace_info"))["cwd"] == b["cwd"]
@@ -536,7 +506,7 @@ async def test_failed_switch_keeps_previous_target(project):
         assert after["cwd"] == before["cwd"] and after["revision"] == 1
 
 
-async def test_repository_subdirectory_keeps_copy_outside_source_repo(project):
+async def test_repository_subdirectory_stays_in_selected_original_directory(project):
     router, server, source, _ = project
     subdir = source / "src"
     subdir.mkdir()
@@ -545,8 +515,8 @@ async def test_repository_subdirectory_keeps_copy_outside_source_repo(project):
     subprocess.run(["git", "-C", str(source), "add", "."], check=True)
     subprocess.run(["git", "-C", str(source), "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "baseline"], check=True)
     result = await call(server, "a", "workspace_switch", host="a", cwd=str(subdir))
-    assert result["cwd"].endswith("/project/src")
-    assert not Path(result["project_root"]).is_relative_to(source)
+    assert result["cwd"] == str(subdir)
+    assert result["project_root"] == str(subdir)
     assert Path(result["cwd"], "module.py").read_text() == "VALUE = 1\n"
 
 
@@ -566,7 +536,7 @@ async def test_job_uses_origin_after_switch_and_cannot_cross_thread(project):
     assert origin.host == "a" and origin.cwd == original["cwd"]
     stopped = await call(server, "a", "stop_job", job_id="same")
     assert stopped["cancel_requested"] is False and stopped["execution_state"] == "finished"
-    assert stopped["task_dir"].startswith(original["cwd"] + "/")
+    assert stopped["task_dir"].startswith(original["remote_state_dir"] + "/")
     with pytest.raises(ToolError, match="Unknown job"):
         await call(server, "b", "job_status", job_id="same")
     with pytest.raises(ToolError, match="Unknown job"):
@@ -611,13 +581,10 @@ async def test_job_controls_fail_closed_without_saved_identity_and_local_reads_b
     server = create_server(router, viewer_url="http://127.0.0.1:9999")
 
     async def inspect(host, cwd):
-        return {"cwd": str(Path(cwd).resolve()), "repository_root": None}
+        return {"cwd": str(Path(cwd).resolve()), "repository_root": None, "home":"/remote/home"}
 
-    async def prepare(executor, source_cwd, target_id, destination):
-        return {"cwd": destination}
 
     monkeypatch.setattr(router, "inspect_directory", inspect)
-    monkeypatch.setattr("remote_workbench.workspace_router.prepare_project", prepare)
 
     first = await call(server, "a", "workspace_switch", host="a", cwd=str(source))
     workspace_id = first["workspace_id"]
@@ -707,13 +674,10 @@ async def test_job_controls_fail_closed_without_saved_identity_and_local_reads_b
 async def test_start_job_idempotency_key_recovers_handle_without_resubmitting(project, monkeypatch):
     router, _, source, other = project
     async def inspect(host, cwd):
-        return {"cwd": str(Path(cwd).resolve()), "repository_root": None}
+        return {"cwd": str(Path(cwd).resolve()), "repository_root": None, "home":"/remote/home"}
 
-    async def prepare(executor, source_cwd, target_id, destination):
-        return {"cwd": destination}
 
     monkeypatch.setattr(router, "inspect_directory", inspect)
-    monkeypatch.setattr("remote_workbench.workspace_router.prepare_project", prepare)
     server = create_server(router, viewer_url="http://127.0.0.1:9999")
     initial = await call(server, "a", "workspace_switch", host="a", cwd=str(source))
     submissions = []
@@ -755,13 +719,10 @@ async def test_unverified_start_actual_cwd_is_not_persisted(project, monkeypatch
     router, _, source, _ = project
 
     async def inspect(host, cwd):
-        return {"cwd": str(Path(cwd).resolve()), "repository_root": None}
+        return {"cwd": str(Path(cwd).resolve()), "repository_root": None, "home":"/remote/home"}
 
-    async def prepare(executor, source_cwd, target_id, destination):
-        return {"cwd": destination}
 
     monkeypatch.setattr(router, "inspect_directory", inspect)
-    monkeypatch.setattr("remote_workbench.workspace_router.prepare_project", prepare)
     server = create_server(router, viewer_url="http://127.0.0.1:9999")
     state = await call(server, "a", "workspace_switch", host="a", cwd=str(source))
 
@@ -791,13 +752,10 @@ async def test_unverified_start_actual_cwd_is_not_persisted(project, monkeypatch
 async def test_rejected_compute_review_can_be_resubmitted_with_the_same_idempotency_key(project, monkeypatch):
     router, _, source, _ = project
     async def inspect(host, cwd):
-        return {"cwd": str(Path(cwd).resolve()), "repository_root": None}
+        return {"cwd": str(Path(cwd).resolve()), "repository_root": None, "home":"/remote/home"}
 
-    async def prepare(executor, source_cwd, target_id, destination):
-        return {"cwd": destination}
 
     monkeypatch.setattr(router, "inspect_directory", inspect)
-    monkeypatch.setattr("remote_workbench.workspace_router.prepare_project", prepare)
     server = create_server(router)
     state = await call(server, "a", "workspace_switch", host="a", cwd=str(source))
     submissions = []
@@ -826,13 +784,10 @@ async def test_rejected_compute_review_can_be_resubmitted_with_the_same_idempote
 async def test_ambiguous_start_failure_is_not_retried_under_the_same_key(project, monkeypatch):
     router, _, source, _ = project
     async def inspect(host, cwd):
-        return {"cwd": str(Path(cwd).resolve()), "repository_root": None}
+        return {"cwd": str(Path(cwd).resolve()), "repository_root": None, "home":"/remote/home"}
 
-    async def prepare(executor, source_cwd, target_id, destination):
-        return {"cwd": destination}
 
     monkeypatch.setattr(router, "inspect_directory", inspect)
-    monkeypatch.setattr("remote_workbench.workspace_router.prepare_project", prepare)
     server = create_server(router)
     state = await call(server, "a", "workspace_switch", host="a", cwd=str(source))
     attempts = []
@@ -913,27 +868,3 @@ async def test_accounting_failure_does_not_turn_a_completed_write_into_failure(p
     result = await call(server, "a", "write_file", path="value.txt", content="written once\n")
     assert result.get("success")
     assert Path(state["cwd"], "value.txt").read_text() == "written once\n"
-
-
-async def test_changes_pages_compact_paths_and_preview_keeps_review_guards(project, monkeypatch):
-    router, server, source, _ = project
-    await call(server, 'a', 'workspace_switch', host='a', cwd=str(source))
-    full = [{'path': f'file-{index:02d}.py', 'change': 'modified', 'supported': True,
-             'source_conflict': False, 'guard': {'source': str(index)},
-             'source_state': {'large': 'technical metadata'}, 'session_state': {}, 'baseline_state': {}}
-            for index in range(23)]
-    async def preview(executor, project_root, paths=None, **kwargs):
-        selected = full if paths is None else [item for item in full if item['path'] in paths]
-        return {'files': [dict(item) for item in selected]}
-    monkeypatch.setattr(session_server_module.baseline, 'preview_delivery', preview)
-    first = await call(server, 'a', 'workspace_changes')
-    assert len(first['files']) == 20 and first['files_total'] == 23
-    assert first['next_offset'] == 20 and first['truncated'] is True
-    assert 'guard' not in first['files'][0] and 'source_state' not in first['files'][0]
-    last = await call(server, 'a', 'workspace_changes', offset=first['next_offset'])
-    assert len(last['files']) == 3 and last['next_offset'] is None
-    reviewed = await call(server, 'a', 'workspace_preview', paths=['file-00.py'])
-    assert reviewed['files'][0]['guard'] == {'source': '0'}
-    assert 'source_state' not in reviewed['files'][0]
-    with pytest.raises(ToolError, match='20 selected paths'):
-        await call(server, 'a', 'workspace_preview', paths=[item['path'] for item in full])

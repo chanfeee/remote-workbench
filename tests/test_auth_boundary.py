@@ -81,8 +81,8 @@ async def test_session_wrapped_authentication_commands_are_rejected_before_execu
     server = create_server(router)
     state = router.registry.get_or_create("auth-guard-test")
     target = WorkspaceTarget("target-id", state.workspace_id, "test", "/source",
-                             "/sessions/target/project", "/sessions/target/project")
-    state = router.registry.commit_switch(state.workspace_id, 0, target)
+                             "/source", "/source")
+    state = router.registry.commit_switch(state.workspace_id, 0, target, remote_state_dir="/runtime/unit-test")
     marker = "session-dummy-sensitive-marker"
     meta = types.RequestParams.Meta(**{"threadId": "auth-guard-test", "sessionId": "test"})
 

@@ -1,5 +1,15 @@
 # Validation status
 
+## Actual-directory-only development (0.3.0a15, 2026-10-26)
+
+- Baseline: `develop` at `c7571b0`, preserving pre-existing uncommitted work. Session and fixed-workspace entry points use the selected actual directory. `workspace_switch(host, cwd)` no longer accepts `directory_mode`; copy preparation, copy delivery tools and copy-origin recovery exceptions have been removed.
+- Old copy files, commits, logs and stored local history are not deleted or migrated. Unsupported saved bindings require selecting the actual directory. Old copy jobs require manual terminal takeover; direct-directory jobs retain immutable origins and restart/lost-reply recovery.
+- Final integrated local regression: **677 passed in 184.31 seconds**. Obsolete copy-only cases were retired; shared-directory, conflict, background-history, registry and compact-output cases now exercise actual-directory behavior. Tests cover copy-interface rejection before SSH, preserved old files/records, independent code/environment/run/result paths, shared write coordination and original-job recovery.
+- Offline wheel and source archive builds passed; all packaged runtime files match the final tested source, the deleted copy module is absent, and private paths/local reports are excluded. Embedded remote source passes Python 3.9 syntax parsing; documentation links and `git diff --check` pass.
+- No real CERN/IHEP execution, App loaded-version acceptance, paid token benchmark, publication or CI run was performed for this change. The independent stable installation and global configuration remain unchanged. Reload all related development MCP processes before using the changed interface.
+- Publication preparation updates only the package version, changelog and documentation after the 677-test run; CI validates the committed candidate before merge.
+- Entries below retain historical validation facts; their copy/delivery behavior is superseded by this update.
+
 ## Linux CI transport follow-up (0.3.0a14 develop)
 
 - The first published phase-1 CI run ([40260425221](https://github.com/chanfeee/remote-workbench/actions/runs/40260425221)) passed packaging but exposed Linux `E2BIG` failures: nested base64 worker/supervisor source exceeded the single-argument limit. Local macOS execution had not reproduced that limit. Python 3.10 also exposed a test that incorrectly required compact summarization of every unittest progress format.
@@ -38,7 +48,7 @@
 
 - Full local regression after the explicit-byte-budget fix: 477 tests passed (99.35 seconds). The later inclusive 2% gate passed its 10 targeted checks. Wheel/sdist builds passed; this develop candidate has not been promoted to main or the independent stable installation.
 - Opt-in session profile: eight exposed tools; advanced operations retain their original validation and routing behind an on-demand gateway. The full profile remains the default.
-- Both local and real IHEP disposable private copies passed the same 21-case acceptance and 18 project tests across eight scripted tool steps. The context patch was checked/applied once; full command output and normalized Git diffs remain in the local audit viewer. These are functional replays, not independent model usage measurements.
+- Deployment-specific SSH replays are private acceptance records and are not included in this portable validation document. Automated local coverage checks the same editing, output and diff interfaces with disposable fixtures.
 - Successful test replies in this replay shrank from 1183 to 373 UTF-8 bytes after removing repeated normal metadata. Bytes are not tokens or subscription usage.
 - The current complete-task ceiling is **2% extra**, inclusive, with original functionality preserved. A fresh actual nine-vs-nine pair on the loaded candidate used 355,677 native vs 372,086 remote tokens (+4.613%); both passed the same 21-case independent acceptance, but the usage gate remains **not qualified**. Original 1% historical reports are retained. The checker rejects different baseline/task hashes, models/settings, request counts, failed acceptance and incomplete/retry-excluded totals.
 - Independent stable remains 0.3.0a10. A local project-only override selects the develop candidate without changing global MCP registration or other projects.
@@ -61,6 +71,14 @@
 - Each MCP reply is one compact text result, measured at 1040–1068 UTF-8 bytes in this fixture, with local paths and chat Markdown rather than binary/base64 payloads. These are byte counts, not tokenizer measurements.
 - Separate chat caches were verified. Missing, non-image, oversized and nonregular files, invalid pages, unavailable renderers, and external/active SVG references are covered. The remote worker still parses as Python 3.9; image rendering libraries run locally.
 - No real server connection or Codex App chat-rendering acceptance was performed. The HTML viewer is unchanged. See [聊天内看图](docs/images.zh-CN.md).
+
+## Historical paired token workflow sample (0.3.0a7) — 2026-10-25
+
+- The fixed `0.3.0a7-0958f5b` build was compared with native local tools using fresh subagents, the same `gpt-6-luna` model and identical frozen CSV-project files. This does not characterize later stable builds.
+- Actual execution-worker usage, including cached input: MCP 1,219,857 tokens / 22 model responses; native 304,203 / 8. The observed workflow difference was 915,654 tokens (4.0100× total usage), not a pure protocol-cost or billing measurement.
+- Both arms passed 28 CSV-project tests, six independent acceptance checks and diff checks. These are fixture checks, not the Remote Workbench regression suite.
+- The first remote run received coordinator follow-ups and is excluded from the primary pair. Guardian usage is recorded separately because billing treatment is unknown. The earlier approximately 2% figure concerned only identified reply redundancy, not complete-task net overhead.
+- Individual run reports, per-response ledgers and review evidence remain local and are excluded from both Git and source distributions. Portable documentation contains no personal run paths, thread/response identifiers or temporary viewer URLs.
 
 ## Viewer instance isolation (0.3.0a7)
 

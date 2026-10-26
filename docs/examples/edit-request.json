@@ -1,0 +1,16 @@
+{
+  "tool": "apply_patch",
+  "arguments": {
+    "cwd": "/remote/project",
+    "edits": [
+      {
+        "edit_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "start_line": 1,
+        "end_line": 1,
+        "new": [
+          "print(\"new\")"
+        ]
+      }
+    ]
+  }
+}
