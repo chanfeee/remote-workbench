@@ -8,11 +8,17 @@ This is an independently maintained derivative of [Onirika](https://github.com/x
 
 本机开发环境与日常稳定版的隔离、安装和切换方式见[开发与稳定版部署](docs/development.zh-CN.md)。
 
-The `main` branch holds the validated stable source; `develop` receives changes first. Promote a fixed commit only after develop CI passes, then check main CI before updating the independent local stable installation.
+Develop 的精简工具模式照常可用；Token/credits 计量仅用于手动运行的独立、可重复基准样本。Remote Workbench 自身的日常命令、编辑和测试路径不采集 token/credits 或模型费用，也不为计量增加模型调用；日常工作流不在回复或 UI 中追加用量评估，基准门槛也不阻止普通任务完成。上述约定仅限定 Remote Workbench 自身的执行与集成路径，不声明 Codex App 或模型服务如何记录账户用量。离线费用账本和门槛脚本仅作为测试辅助工具保留；完整操作记录与必要执行诊断照常保留。基准口径与历史样本见[独立 Token 基准](docs/token-budget.zh-CN.md)。
+
+第一批可靠性修复、离线费用账本测试工具及后续目录模式设计见[开发任务与执行状态](docs/development-plan.zh-CN.md)和[direct/copy 契约](docs/workspace-mode-contract.zh-CN.md)。当前 develop 阶段的 MCP 记录明确目标上的命令、文件与后台任务生命周期；科研解释、验证是否充分及被操作项目的测试适用性由调用 Agent 和用户判断。费用脚本为 `python3 scripts/build_cost_ledger.py --help`，仅用于手动基准样本；费率或速度缺失时保留未知，不当作实际零费用。
+
+The `main` branch is the development integration branch: pull requests are merged manually after CI passes. The `stable` branch tracks validated release candidates; version tags and GitHub Releases pin each stable distribution. Existing `develop` work is retained during migration. See [branch and release policy](docs/release-policy.zh-CN.md).
 
 The `remote-workbench-session` entry point (0.3.0a10) provides: persistent workspaces routed by MCP `_meta.threadId`, atomic host/directory switching, jobs pinned to their original targets and checked against node/process identity, explicit project snapshots, and measured response bytes. Each thread keeps its own remote project copies. An identity-only diagnostic is available before enabling remote tools. This does not change an independently installed stable release; see [Session 原型与客户端联调边界](docs/session-prototype.zh-CN.md).
 
 当前版本提供任务重试去重、独立控制通道、后台日志自动采集、本地等待与搜索、工程基线及交付预览，见[可靠性与权限边界](docs/reliability.zh-CN.md)。stable 只在独立验证后手动推广固定构建；凭证隔离和真实集群验收仍需单独完成。
+
+Develop 的后台任务恢复与操作记录见[后台任务恢复](docs/lifecycle-recovery.zh-CN.md)：`workspace_resume()` 默认只返回 binding、jobs 和 note 操作事实，不读写测试缓存；`include_legacy_test_history=True` 只读旧测试历史，不判断其对当前代码是否适用，也不触发 SSH 扫描。`workspace_snapshot()` 默认检查显式元数据和 Git 状态；只有显式启用有界内容扫描时才计算内容指纹，不自动维护项目验证结论。丢失启动回复或重启 MCP 后仍可接回原任务。
 
 ## Work locally and across several servers
 

@@ -4,7 +4,7 @@ from remote_workbench.remote_client import edit
 
 @mcp.tool()
 async def ssh_apply_patch(patch: str, cwd: str, host: str | None = None, check_only: bool = False) -> dict:
-    """Check/apply a unified Git patch relative to the repository root. Worktree only.
+    """Check/apply a context patch (*** Begin Patch) or unified Git patch. Worktree only.
 
     Uses git apply with default path protections and no --reject/--index. Check
     and apply are serialized against other calls to this tool, not external editors.

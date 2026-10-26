@@ -3,6 +3,7 @@ import base64
 import os
 import pwd
 import shlex
+import zlib
 
 
 def login_shell():
@@ -20,7 +21,18 @@ def login_shell():
 def python_command(source):
     # A base64-only payload avoids history/quote expansion by the SSH account's
     # outer shell, including csh and fish. No user data is interpolated as code.
-    encoded = base64.b64encode(source.encode("utf-8")).decode("ascii")
+    data = source.encode("utf-8")
+    # Worker source is nested inside the foreground supervisor command. Plain
+    # base64 at each layer can exceed Linux's per-argument limit even when the
+    # total argv is below ARG_MAX. Compress large source before encoding; stdin
+    # remains available for the existing request/heartbeat protocol.
+    if len(data) >= 16384:
+        compressed = zlib.compress(data)
+        if len(compressed) < len(data):
+            encoded = base64.b64encode(compressed).decode("ascii")
+            return "python3 -c " + shlex.quote(
+                'import base64,zlib;exec(zlib.decompress(base64.b64decode("' + encoded + '")))')
+    encoded = base64.b64encode(data).decode("ascii")
     return "python3 -c " + shlex.quote('import base64;exec(base64.b64decode("' + encoded + '"))')
 
 

@@ -139,7 +139,7 @@ def read_output(record_id: str, stream="stdout", cursor=0, max_bytes=8192, max_l
 def preview(data: bytes, budget: int, max_lines=200) -> tuple[str, bool]:
     """Head/tail preview, with both a byte and line cap (including long lines)."""
     lines = data.splitlines(keepends=True)
-    limited = len(lines) > max_lines
+    limited = max_lines is not None and len(lines) > max_lines
     if limited:
         left = max(1, max_lines // 2)
         data = b"".join(lines[:left]) + b"\n[truncated lines]\n" + b"".join(lines[-left:])

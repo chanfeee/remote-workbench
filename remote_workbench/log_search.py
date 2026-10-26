@@ -118,8 +118,12 @@ def search_saved_output(
             response["truncated"] = True
 
         # Even a deliberately small response budget can always return the
-        # next location without context, keeping pagination usable.
+        # next location without context, keeping pagination usable. Advance
+        # past this returned match start so the next page cannot return it
+        # forever; advancing by one byte still preserves overlapping matches.
         if not response["matches"] and visible and response["next_cursor"] == visible[0]:
+            response["next_cursor"] = visible[0] + 1
+            response["truncated"] = True
             response["matches"].append({
                 "offset": visible[0],
                 "context_start": visible[0],

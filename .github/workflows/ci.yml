@@ -2,10 +2,13 @@ name: CI
 
 on:
   pull_request:
+    branches:
+      - main
+      - stable
   push:
     branches:
       - main
-      - develop
+      - stable
   workflow_dispatch:
 
 permissions:

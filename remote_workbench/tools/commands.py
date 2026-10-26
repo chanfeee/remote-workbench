@@ -9,6 +9,7 @@ import uuid
 from remote_workbench import audit
 from remote_workbench.server import mcp, require_connection, get_executor
 from remote_workbench.remote_client import edit
+from remote_workbench import job_collector
 from remote_workbench.compute_review import check_compute_review
 
 _SAFE_JOB_ID = re.compile(r"^[a-zA-Z0-9_-]{1,80}$")
@@ -96,7 +97,13 @@ async def ssh_stop_job(job_id: str, host: str | None = None) -> dict:
     """
     if not _SAFE_JOB_ID.fullmatch(job_id):
         return {"error": "invalid_job_id"}
-    return await get_executor(host).cancel_task(job_id)
+    executor = get_executor(host)
+    origin = job_collector.current_origin(executor, job_id)
+    if origin is not None:
+        origin = job_collector.origin_for_control(executor, job_id, origin)
+        if origin.get("error"):
+            return origin
+    return await executor.cancel_task(job_id, origin=origin)
 
 
 @mcp.tool()
@@ -115,6 +122,9 @@ async def ssh_job_status(job_id: str, tail_lines: int = 50, host: str | None = N
         raise ValueError("Invalid cursor/tail_lines/max_bytes")
     executor = get_executor(host)
     ensured = await _ensure_job_collection(executor, job_id)
+    if (job_collector.current_origin(executor, job_id) is not None and
+            isinstance(ensured, dict) and ensured.get("error")):
+        return ensured
     local = _local_job_snapshot(executor, job_id)
     if (not local or not local.get("job_output_id")) and isinstance(ensured, dict):
         local = ensured
@@ -166,7 +176,15 @@ async def _ensure_job_collection(executor, job_id):
     ensure = getattr(executor, "ensure_job_collection", None)
     if ensure is None:
         return None
-    value = ensure(job_id)
+    origin = job_collector.current_origin(executor, job_id)
+    if origin is None:
+        value = ensure(job_id)
+    else:
+        try:
+            parameters = inspect.signature(ensure).parameters
+        except (TypeError, ValueError):
+            parameters = {}
+        value = ensure(job_id, origin=origin) if "origin" in parameters else ensure(job_id)
     return await value if inspect.isawaitable(value) else value
 
 
@@ -219,10 +237,14 @@ async def ssh_job_wait(job_id: str, host: str | None = None, wait_seconds: float
     info = _local_job_snapshot(executor, job_id)
     if (not info or not info.get("job_output_id")) and isinstance(ensured, dict):
         info = ensured
+    if (job_collector.current_origin(executor, job_id) is not None and
+            isinstance(ensured, dict) and ensured.get("error")):
+        return ensured
     if not info or not info.get("job_output_id"):
         return {"job_id": job_id, "error": "local_job_unavailable", "running": None,
                 "execution_state": "unknown", "sync_state": "unknown",
-                "message": (ensured.get("message") if isinstance(ensured, dict) else None) or
+                "message": (ensured.get("sync_error") or ensured.get("message")
+                            if isinstance(ensured, dict) else None) or
                            "No locally collected output is available for this job."}
     output_id = info["job_output_id"]
     sizes = _local_job_sizes(output_id)

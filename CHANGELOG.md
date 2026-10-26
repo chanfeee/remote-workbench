@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.3.0a14 (develop)
+
+- Compress large remote Python bootstrap source before base64 encoding so nested worker/supervisor commands stay below Linux's single-argument size limit. Preserve the existing stdin, login-shell and supervision protocols.
+- Route scripts, test runners and builds through the same ordinary command/job lifecycle. Remove automatic project fingerprints, test attempts, cache invalidation and test-evidence audit/collector callbacks from execution and recovery.
+- Make legacy test history an explicit, local-only `workspace_resume(include_legacy_test_history=True)` read. Preserve stored observations without asserting that they apply to current code.
+- Make project content scanning opt-in through `workspace_snapshot(scan_content=True, max_files=..., max_content_bytes=...)`; default snapshots inspect metadata and Git state without content fingerprints or test-history comparison.
+- Keep factual command/output/job records, original-target recovery, guarded edits and copy delivery protections. Preserve truncation in compact replies, and keep ambiguous unittest/subTest counts unknown.
+- Align the development scope with generic execution and recovery. Direct mode and limited shared-directory coordination remain later work; existing copy targets, historical records and the independent stable installation retain their behavior.
+
+## 0.3.0a13 (develop)
+
+- Separate unittest's reported top-level tests and skips. Skipped subtests can make execution/pass counts unknowable; compact replies and HTML use the same facts and retain raw output access.
+- Recover the original background job after a lost launch reply or MCP restart, using persisted target/endpoint/path identity. Reuse one local output handle and collector, continue byte cursors, and preserve unknown states instead of resubmitting commands.
+- Register test attempts before execution and persist collector/recovery observations against the original project. Keep latest attempts, reliable completions and current-code association separate; order records by attempt start and preserve completed historical evidence on repeated reads.
+- Keep process outcomes separate from recognized unittest results. Missing summaries, incomplete fingerprints and unverified dependencies/environments remain explicit; workspace resume stays local-only.
+- Reject authentication commands before job origin/reservation and test-attempt writes, retaining only a redacted refusal audit.
+
+## 0.3.0a12 (develop)
+
+- Advance contextless saved-log search pages without repeating the same match; preserve overlapping matches and byte budgets.
+- Preserve unittest skipped/executed counts and expected failures; avoid deriving passing-test counts from failed subtest summaries.
+- Treat workspace recovery results as historical observations. Invalidate current test applicability on possible writes and re-associate matching code only through a fresh bounded snapshot, without claiming environment verification.
+- Add an offline cost ledger with explicit rate snapshots, stable request deduplication, separate actual/estimated amounts, and visible unknown coverage. Keep it as a test helper for manually run, independent benchmark samples; it does not establish full-task savings or gate routine task completion.
+- Clarify that the Remote Workbench path for routine commands, edits, and tests does not collect token/credit or model-fee data or add metering model calls; the integration workflow does not append usage assessments to replies or UI. This scopes the statement to Remote Workbench and makes no claim about Codex App or model-service account usage records. Retain operation records and necessary execution diagnostics.
+- Document direct/copy migration and resource-coordination contracts; these modes and locks are not implemented by this release.
+
+## 0.3.0a11 (develop)
+
+- Add an opt-in compact session tool profile, on-demand advanced schemas, reusable workspace audit links and conservative successful-test summaries.
+- Combine explicit workspace selection and its first inspection without another model round.
+- Accept context patches without model-calculated hunk counts; keep standard unified diffs in the human audit viewer.
+- Honor explicit command-output byte budgets without the legacy 200-line ceiling; preserve byte caps, complete local spools, and the default line cap when no byte budget is supplied.
+- Add a complete-task token budget gate with the user's maximum 2% extra usage; the latest valid nine-vs-nine sample is +4.613% and does not qualify.
+
 ## 0.3.0a10
 
 - Always include filenames in remote grep matches, including a single input file on GNU grep; preserve the same result format across Linux and macOS.

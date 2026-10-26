@@ -14,7 +14,9 @@ from typing import Any
 
 _STATE_LABELS = {
     "success": "成功",
+    "completed": "已完成",
     "failed": "失败",
+    "skipped": "已跳过",
     "running": "运行中",
     "timeout": "已超时",
     "checked": "检查通过",
@@ -78,6 +80,9 @@ _UNITTEST_SUMMARY = re.compile(
     r"(?:[ \t]*\r?\n)*[ \t]*(OK(?:\s+\([^\r\n)]*\))?|FAILED(?:\s+\([^\r\n)]*\))?)[ \t]*\r?\n?[ \t\r\n]*\Z"
 )
 _UNITTEST_FAILURE = re.compile(r"(?m)^(?:FAIL|ERROR):\s*(.+?)\s*$")
+_UNITTEST_COUNTER = re.compile(
+    r"(?P<name>failures|errors|skipped|expected failures|unexpected successes)=(?P<count>\d+)"
+)
 
 
 def _mapping(value: Any) -> dict:
@@ -283,6 +288,36 @@ def _contains_error(record: dict) -> bool:
     return bool(record.get("error")) or record.get("status") == "failed" or record.get("patch_result") == "failed"
 
 
+def _unittest_counters(footer: str, total: int) -> dict | None:
+    """Parse only unittest's known footer counters; unknown forms stay visible."""
+    open_paren = footer.find(" (")
+    if open_paren < 0:
+        return {}
+    if not footer.endswith(")"):
+        return None
+    raw = footer[open_paren + 2:-1]
+    if not raw:
+        return None
+    counters = {}
+    for item in raw.split(", "):
+        match = _UNITTEST_COUNTER.fullmatch(item)
+        if not match or match.group("name") in counters:
+            return None
+        counters[match.group("name")] = int(match.group("count"))
+
+    expected_failures = counters.get("expected failures", 0)
+    # unittest counts skipped subtests as well as skipped TestCase methods, so
+    # the framework's skipped counter may exceed its top-level ``Ran N`` count.
+    # Expected failures, in contrast, are reported per top-level test case.
+    if expected_failures > total:
+        return None
+    if footer.startswith("OK") and any(
+        counters.get(name, 0) for name in ("failures", "errors", "unexpected successes")
+    ):
+        return None
+    return counters
+
+
 def summarize_output(text: str, record: dict, stream: str, complete: bool = False) -> dict | None:
     """Summarize a complete Python ``unittest`` result when its ending is clear.
 
@@ -311,7 +346,25 @@ def summarize_output(text: str, record: dict, stream: str, complete: bool = Fals
     seconds = float(match.group(2))
     footer = match.group(3)
     reported_success = footer.startswith("OK")
+    counters = _unittest_counters(footer, count)
+    if counters is None or count == 0:
+        return None
+    skipped = counters.get("skipped", 0)
+    expected_failures = counters.get("expected failures", 0)
+    # ``Ran N`` is unittest's top-level testsRun count. Its skip counter also
+    # includes subTest skips, so it cannot be subtracted from N to infer how
+    # many top-level tests executed or passed. With no reported skips, the
+    # top-level execution count is exact; an OK footer then lets us subtract
+    # expected failures from the pass count.
+    executed = count if skipped == 0 else None
+    passed = executed - expected_failures if reported_success and executed is not None else None
     operation_failed = _contains_error(record) or exit_code not in (None, 0)
+    if operation_failed:
+        process_status = "failed"
+    elif exit_code == 0:
+        process_status = "success"
+    else:
+        process_status = "unknown"
     if reported_success and exit_code is None and not _contains_error(record):
         return None
     if reported_success and operation_failed:
@@ -321,6 +374,19 @@ def summarize_output(text: str, record: dict, stream: str, complete: bool = Fals
             detail = f"报告耗时 {seconds:.3f} 秒；进程退出码 {exit_code}"
         else:
             detail = f"报告耗时 {seconds:.3f} 秒；操作状态为失败"
+    elif reported_success and (skipped or expected_failures):
+        state = "completed"
+        details = [f"框架运行 {count} 项"]
+        if skipped:
+            details.append(f"框架报告跳过 {skipped} 项")
+        if expected_failures:
+            details.append(f"预期失败 {expected_failures} 项")
+        if executed is None:
+            details.append("执行数和通过数未知")
+        else:
+            details.append(f"执行 {executed} 项，通过 {passed} 项")
+        title = "测试报告完成（" + "，".join(details) + "）"
+        detail = f"耗时 {seconds:.3f} 秒；进程成功退出"
     elif reported_success:
         state = "success"
         title = f"{count} 项测试通过"
@@ -336,6 +402,12 @@ def summarize_output(text: str, record: dict, stream: str, complete: bool = Fals
         "title": title,
         "state": state,
         "count": count,
+        "tests_run": count,
+        "reported_skips": skipped,
+        "executed": executed,
+        "passed": passed,
+        "report_status": "success" if reported_success else "failed",
+        "process_status": process_status,
         "detail": detail,
         "complete": True,
     }
@@ -343,6 +415,18 @@ def summarize_output(text: str, record: dict, stream: str, complete: bool = Fals
     if failures:
         result["failures"] = failures[:20]
         result["failure_count"] = len(failures)
+    # Keep the older presentation aliases for current consumers. ``count``
+    # and ``total`` both mean the framework's top-level count; ``skipped``
+    # mirrors its reported skip-event count, now clarified by reported_skips.
+    result.update({"total": count, "skipped": skipped})
+    if expected_failures:
+        result["expected_failures"] = expected_failures
+    if counters.get("unexpected successes"):
+        result["unexpected_successes"] = counters["unexpected successes"]
+    if counters.get("failures"):
+        result["reported_failures"] = counters["failures"]
+    if counters.get("errors"):
+        result["reported_errors"] = counters["errors"]
     return result
 
 

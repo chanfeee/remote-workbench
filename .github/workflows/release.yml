@@ -1,0 +1,88 @@
+name: Prepare stable release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Final version already committed to stable (X.Y.Z)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prepare-stable-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Validate and draft stable release
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out release tooling from the dispatched main commit
+        uses: actions/checkout@v6.0.3
+        with:
+          ref: ${{ github.sha }}
+          path: release-tools
+          persist-credentials: false
+
+      - name: Check out the stable candidate
+        uses: actions/checkout@v6.0.3
+        with:
+          ref: stable
+          fetch-depth: 0
+          path: candidate
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          enable-cache: true
+
+      - name: Validate immutable candidate and version
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: >-
+          python release-tools/scripts/check_release_candidate.py
+          --project candidate --version "$RELEASE_VERSION"
+          --output "$RUNNER_TEMP/release-candidate.json"
+
+      - name: Confirm browser-script test runtime
+        run: node --version
+
+      - name: Test the candidate
+        working-directory: candidate
+        run: uv run --frozen --python 3.13 --extra dev --extra images pytest -q
+
+      - name: Recheck tested sources before building
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: >-
+          python release-tools/scripts/check_release_candidate.py
+          --project candidate --version "$RELEASE_VERSION"
+
+      - name: Build release assets
+        working-directory: candidate
+        run: |
+          uv build
+          uv export --frozen --no-dev --extra images --no-emit-project --no-hashes --output-file dist/runtime-requirements.txt
+          cd dist
+          sha256sum *.whl *.tar.gz runtime-requirements.txt > SHA256SUMS
+
+      - name: Create an unpublished draft from the verified commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          TAG=$(python -c 'import json,os; print(json.load(open(os.environ["RUNNER_TEMP"]+"/release-candidate.json"))["tag"])')
+          COMMIT=$(python -c 'import json,os; print(json.load(open(os.environ["RUNNER_TEMP"]+"/release-candidate.json"))["commit"])')
+          gh release create "$TAG" candidate/dist/* --target "$COMMIT" --title "$TAG" --generate-notes --draft

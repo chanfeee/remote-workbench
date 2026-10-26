@@ -80,7 +80,7 @@ TOOLS = [
     ("fetch_image", files.ssh_fetch_image, "Fetch a remote PNG/JPG/PDF/SVG to a private local cache. PDF page is 1-based. Show returned image_markdown in chat; paths and metadata only, no base64. PDF/SVG previews require the local images extra."),
     ("write_file", files.ssh_write_file, "Atomically write remote UTF-8 content. Optional expected_sha256 rejects stale edits."),
     ("patch_file", files.ssh_patch_file, "Apply unique old/new replacements, or sequential edits=[{old,new}], remotely. Optional expected_sha256 and check_only; returns this edit's diff."),
-    ("apply_patch", patch.ssh_apply_patch, "Check and apply a unified Git diff remotely. Paths are repository-root relative. check_only previews validation; does not stage or commit."),
+    ("apply_patch", patch.ssh_apply_patch, "Apply *** Begin Patch context format (Add/Update/Delete File; @@ hunks), or unified Git diff. Update existing files together in one patch; do not delete first to rewrite. No context-format line counts. Paths use the repo root. check_only validates without writing."),
     ("list_dir", files.ssh_list_dir, "List remote entries. Relative paths start at the workspace root."),
     ("grep", search.ssh_grep, "Search remote file contents by regex, with bounded results."),
     ("find_files", search.ssh_find_files, "Find remote paths by filename glob, type and depth, with bounded results."),

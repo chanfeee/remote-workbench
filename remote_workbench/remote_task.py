@@ -62,6 +62,83 @@ def job_liveness(origin):
     return True, {}
 
 
+def verify_job_origin(origin, status, *, job_id, remote_state_dir,
+                      expected_nonce, expected_launch_cwd, exit_code,
+                      expected_identity=None, expected_actual_cwd=None):
+    """Validate a persisted job identity before reading, following or stopping it.
+
+    A terminal supervisor PID is expected to have exited, so terminal records
+    are checked against the immutable origin/status pair and current node/boot
+    identity instead of requiring that PID to remain live.
+    """
+    if not isinstance(origin, dict) or not isinstance(status, dict):
+        return False, "origin_record_incomplete", None
+    required = ("node", "pid", "start_token", "task_id", "task_dir")
+    if expected_nonce is not None:
+        required += ("origin_nonce", "launch_cwd", "actual_cwd")
+    if any(origin.get(key) in (None, "") for key in required):
+        return False, "origin_record_incomplete", None
+    if (not isinstance(origin.get("pid"), int) or isinstance(origin.get("pid"), bool)
+            or origin["pid"] <= 0 or not isinstance(origin.get("node"), str)
+            or not isinstance(origin.get("start_token"), str)):
+        return False, "origin_record_incomplete", None
+    if origin.get("version") != 2:
+        return False, "origin_version_unconfirmed", None
+    if expected_nonce is not None and origin.get("origin_nonce") != expected_nonce:
+        return False, "origin_nonce_mismatch", None
+    if origin.get("task_id") != job_id:
+        return False, "task_id_mismatch", None
+    expected_dir = os.path.normpath(os.path.join(remote_state_dir, "jobs", job_id))
+    if os.path.normpath(origin.get("task_dir", "")) != expected_dir:
+        return False, "task_dir_mismatch", None
+    if expected_launch_cwd is not None and origin.get("launch_cwd") != expected_launch_cwd:
+        return False, "launch_cwd_mismatch", None
+    if "actual_cwd" in origin and (not isinstance(origin.get("actual_cwd"), str) or
+                                     not origin["actual_cwd"].startswith("/")):
+        return False, "actual_cwd_unavailable", None
+    if expected_actual_cwd is not None and origin.get("actual_cwd") != expected_actual_cwd:
+        return False, "actual_cwd_mismatch", None
+    identity_fields = ("node", "boot_id", "pid", "start_token", "task_id", "task_dir", "version")
+    if "origin_nonce" in origin:
+        identity_fields += ("origin_nonce",)
+    if "launch_cwd" in origin:
+        identity_fields += ("launch_cwd",)
+    if "actual_cwd" in origin:
+        identity_fields += ("actual_cwd",)
+    for key in identity_fields:
+        if status.get(key) != origin.get(key):
+            return False, "status_origin_mismatch", None
+    if expected_identity is not None:
+        for key in ("node", "boot_id", "pid", "start_token", "task_id", "task_dir", "version"):
+            if key in expected_identity and origin.get(key) != expected_identity.get(key):
+                return False, "saved_process_identity_mismatch", None
+
+    current = machine_identity()
+    if current.get("node") != origin.get("node"):
+        return False, "different_node", None
+    origin_boot = origin.get("boot_id")
+    current_boot = current.get("boot_id")
+    if origin_boot and current_boot and origin_boot != current_boot:
+        return False, "different_boot", None
+    if (origin.get("start_token", "").startswith("proc:") and
+            (not origin_boot or not current_boot)):
+        return False, "boot_identity_unavailable", None
+
+    finished = status.get("state") == "finished"
+    if finished:
+        if exit_code is None or status.get("exit_code") != exit_code:
+            return False, "terminal_record_incomplete", None
+        return True, None, False
+    if exit_code is not None:
+        return False, "terminal_record_incomplete", None
+    if status.get("state") != "running":
+        return False, "status_state_unconfirmed", None
+    running, detail = job_liveness(origin)
+    if running is not True:
+        return False, detail.get("state_reason", "process_unconfirmed"), None
+    return True, None, True
+
+
 def task_state_root():
     default = Path.home() / ".cache" / "remote-workbench-ssh"
     return Path(os.environ.get("REMOTE_WORKBENCH_REMOTE_STATE_DIR", str(default))).expanduser().absolute()
@@ -182,7 +259,9 @@ def supervise_task(settings):
 
     origin = dict(machine_identity(), version=2, pid=os.getpid(), start_token=process_start(os.getpid()),
                   task_id=task_id, task_dir=str(root), backend="process-group",
-                  timeout_seconds=timeout)
+                  timeout_seconds=timeout, origin_nonce=settings.get("origin_nonce"),
+                  launch_cwd=settings.get("launch_cwd", settings.get("cwd")),
+                  actual_cwd=settings.get("actual_cwd", settings.get("cwd")))
     save_task_json(root / "origin.json", origin)
     process = None
     completion = None if retains_zombie else root / "workload_exit_code"
@@ -301,35 +380,112 @@ def supervise_task(settings):
     return code
 
 
-def cancel_task(root, wait_seconds=0):
+def cancel_task(root, wait_seconds=0, *, expected_nonce=None,
+               expected_launch_cwd=None, expected_remote_state_dir=None, task_id=None,
+               expected_identity=None, expected_actual_cwd=None):
     """Independent control request. Never kill a PID taken from an old file."""
     root = Path(root)
-    try:
-        status = json.loads((root / "status.json").read_text())
-        if status.get("state") == "finished":
-            return dict(status, cancel_requested=False,
-                        execution_state="unknown" if status.get("cleanup_state") == "unconfirmed" else "finished")
-    except FileNotFoundError:
-        pass
-    origin = json.loads((root / "origin.json").read_text())
-    running, detail = job_liveness(origin)
-    if not running or origin.get("version") != 2:
-        return {"cancel_requested": False, "execution_state": "unknown", **detail}
-    # The supervisor outside the workload scope performs TERM -> KILL itself.
-    try:
-        fd = os.open(root / "cancel", os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-        os.close(fd)
-    except FileExistsError:
-        pass
-    end = time.monotonic() + wait_seconds
-    while time.monotonic() < end:
+    expected_origin = expected_nonce is not None or expected_identity is not None
+    directory_fd = None
+    directory_identity = None
+
+    def read_expected():
+        if root.is_symlink() or any((root / name).is_symlink()
+                                    for name in ("origin.json", "status.json", "exit_code")):
+            return None, None, "job_identity_path_is_symlink"
+        try:
+            current_origin = json.loads((root / "origin.json").read_text())
+            current_status = json.loads((root / "status.json").read_text())
+            exit_path = root / "exit_code"
+            code = int(exit_path.read_text()) if exit_path.exists() else None
+            valid, reason, _ = verify_job_origin(
+                current_origin, current_status, job_id=task_id,
+                remote_state_dir=expected_remote_state_dir,
+                expected_nonce=expected_nonce, expected_launch_cwd=expected_launch_cwd,
+                exit_code=code, expected_identity=expected_identity,
+                expected_actual_cwd=expected_actual_cwd)
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            return None, None, "origin_record_incomplete"
+        if not valid:
+            return None, None, reason
+        return current_origin, current_status, None
+
+    if expected_origin:
+        if (expected_remote_state_dir is None or
+                str(task_state_root()) != str(Path(expected_remote_state_dir).expanduser().absolute())):
+            return {"cancel_requested": False, "execution_state": "unknown",
+                    "state_reason": "remote_state_dir_mismatch"}
+        origin, status, reason = read_expected()
+        if reason:
+            return {"cancel_requested": False, "execution_state": "unknown", "state_reason": reason}
+        try:
+            directory_fd = os.open(root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) |
+                                   getattr(os, "O_NOFOLLOW", 0))
+            opened = os.fstat(directory_fd)
+            current = os.stat(root, follow_symlinks=False)
+            directory_identity = (opened.st_dev, opened.st_ino)
+            if directory_identity != (current.st_dev, current.st_ino):
+                os.close(directory_fd)
+                directory_fd = None
+                return {"cancel_requested": False, "execution_state": "unknown",
+                        "state_reason": "job_identity_path_changed"}
+        except OSError as exc:
+            if directory_fd is not None:
+                os.close(directory_fd)
+                directory_fd = None
+            return {"cancel_requested": False, "execution_state": "unknown",
+                    "state_reason": "job_directory_unavailable", "message": str(exc)}
+    else:
         try:
             status = json.loads((root / "status.json").read_text())
-            if status.get("state") == "finished":
+        except FileNotFoundError:
+            status = None
+        origin = json.loads((root / "origin.json").read_text())
+        if not status or status.get("state") != "finished":
+            running, detail = job_liveness(origin)
+            if not running or origin.get("version") != 2:
+                return {"cancel_requested": False, "execution_state": "unknown", **detail}
+
+    try:
+        if status and status.get("state") == "finished":
+            return dict(status, cancel_requested=False,
+                        execution_state="unknown" if status.get("cleanup_state") == "unconfirmed" else "finished")
+        # The supervisor outside the workload scope performs TERM -> KILL itself.
+        if directory_fd is not None:
+            fd = os.open("cancel", os.O_CREAT | os.O_EXCL | os.O_WRONLY |
+                         getattr(os, "O_NOFOLLOW", 0), 0o600, dir_fd=directory_fd)
+        else:
+            fd = os.open(root / "cancel", os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        os.close(fd)
+        end = time.monotonic() + wait_seconds
+        while time.monotonic() < end:
+            if expected_origin:
+                try:
+                    current = os.stat(root, follow_symlinks=False)
+                except OSError:
+                    return {"cancel_requested": True, "execution_state": "unknown",
+                            "state_reason": "job_identity_path_changed"}
+                if (current.st_dev, current.st_ino) != directory_identity:
+                    return {"cancel_requested": True, "execution_state": "unknown",
+                            "state_reason": "job_identity_path_changed"}
+                _, status, reason = read_expected()
+                if reason:
+                    return {"cancel_requested": True, "execution_state": "unknown",
+                            "state_reason": reason}
+            else:
+                try:
+                    status = json.loads((root / "status.json").read_text())
+                except FileNotFoundError:
+                    status = None
+            if status and status.get("state") == "finished":
                 return dict(status, cancel_requested=True,
                             execution_state="unknown" if status.get("cleanup_state") == "unconfirmed" else "finished")
-        except FileNotFoundError:
-            pass
-        time.sleep(0.05)
-    return {"cancel_requested": True, "execution_state": "cancellation_requested",
-            "node": origin["node"], "pid": origin["pid"], "pgid": origin.get("pgid")}
+            time.sleep(0.05)
+        return {"cancel_requested": True, "execution_state": "cancellation_requested",
+                "node": origin["node"], "pid": origin["pid"], "pgid": origin.get("pgid")}
+    except FileExistsError:
+        return {"cancel_requested": True, "execution_state": "cancellation_requested",
+                "node": origin["node"], "pid": origin["pid"], "pgid": origin.get("pgid")}
+    finally:
+        if directory_fd is not None:
+            os.close(directory_fd)

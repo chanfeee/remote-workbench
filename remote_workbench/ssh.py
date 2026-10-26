@@ -53,13 +53,14 @@ class SSHExecutor:
         from remote_workbench.job_collector import local_info
         return local_info(self, job_id)
 
-    async def ensure_job_collection(self, job_id: str) -> dict:
+    async def ensure_job_collection(self, job_id: str, origin: dict | None = None) -> dict:
         from remote_workbench.job_collector import ensure
-        return await ensure(self, job_id)
+        return await ensure(self, job_id, origin=origin)
 
-    async def track_job(self, result: dict, command: str, cwd: str) -> dict:
+    async def track_job(self, result: dict, command: str, cwd: str,
+                        origin: dict | None = None) -> dict:
         from remote_workbench.job_collector import track
-        return await track(self, result, command, cwd)
+        return await track(self, result, command, cwd, origin=origin)
 
     async def close_collectors(self):
         from remote_workbench.job_collector import close
@@ -341,7 +342,10 @@ class SSHExecutor:
                     data += source.read(first)
                 else:
                     data = source.read(cap)
-            text, cut = audit.preview(data, max(0, cap), self.config.max_output_lines)
+            # An explicit byte budget must not silently keep the legacy 200-line
+            # ceiling: a complete small diff can exceed that many short lines.
+            line_limit = self.config.max_output_lines if output_budget is None else None
+            text, cut = audit.preview(data, max(0, cap), line_limit)
             contents[stream] = text
             truncated |= cut or sizes[stream] > cap
         transport_failed = exit_code == 255 and _is_ssh_error(contents["stderr"])
@@ -370,7 +374,8 @@ class SSHExecutor:
             args.extend(["-p", str(self.config.port)])
         return [*args, self.config.ssh_target, command]
 
-    async def cancel_task(self, task_id: str, *, kind: str = "jobs") -> dict:
+    async def cancel_task(self, task_id: str, *, kind: str = "jobs",
+                          origin: dict | None = None) -> dict:
         """Cleanup remains callable while ordinary execution is disabled.
 
         No interactive login shell, preamble, workload runtime, or new SSH
@@ -384,7 +389,32 @@ class SSHExecutor:
         source = "login_spec = None\n" + source
         if self.remote_state_dir:
             source += "\nos.environ['REMOTE_WORKBENCH_REMOTE_STATE_DIR'] = " + repr(self.remote_state_dir) + "\n"
-        source += ("\ntry:\n value = cancel_task(task_state_root() / " + repr(kind) + " / " + repr(task_id) +
+        expected = ""
+        if origin is not None:
+            state_dir = origin.get("remote_state_dir")
+            identity = origin.get("_legacy_identity")
+            if not state_dir or not origin.get("ssh_target"):
+                return {"cancel_requested": False, "execution_state": "unknown",
+                        "state_reason": "recovery_descriptor_incomplete"}
+            if identity is not None:
+                if not all(identity.get(name) for name in
+                           ("node", "pid", "start_token", "task_id", "task_dir", "version")):
+                    return {"cancel_requested": False, "execution_state": "unknown",
+                            "state_reason": "saved_process_identity_incomplete"}
+                expected = (", expected_identity=" + repr(identity) +
+                            ", expected_remote_state_dir=" + repr(state_dir) +
+                            ", task_id=" + repr(task_id) +
+                            ", expected_actual_cwd=" + repr(origin.get("actual_cwd")))
+            else:
+                if not origin.get("origin_nonce") or not origin.get("launch_cwd"):
+                    return {"cancel_requested": False, "execution_state": "unknown",
+                            "state_reason": "recovery_descriptor_incomplete"}
+                expected = (", expected_nonce=" + repr(origin["origin_nonce"]) +
+                            ", expected_launch_cwd=" + repr(origin["launch_cwd"]) +
+                            ", expected_remote_state_dir=" + repr(state_dir) +
+                            ", task_id=" + repr(task_id) +
+                            ", expected_actual_cwd=" + repr(origin.get("actual_cwd")))
+        source += ("\ntry:\n value = cancel_task(task_state_root() / " + repr(kind) + " / " + repr(task_id) + expected +
                    ", wait_seconds=" + repr(self.config.terminate_grace_seconds + 3) + ")\n"
                    "except (OSError, ValueError) as exc:\n value = {'error': 'cleanup_unconfirmed', 'message': str(exc), 'execution_state': 'unknown'}\n"
                    "print('\\x1eREMOTE_WORKBENCH_CONTROL\\x1f' + json.dumps(value))\n")
@@ -403,7 +433,10 @@ class SSHExecutor:
             marker = b"\x1eREMOTE_WORKBENCH_CONTROL\x1f"
             value, _ = json.JSONDecoder().raw_decode(out.split(marker, 1)[1].decode())
             audit.update(record, status="finished", remote_task=value, exit_code=proc.returncode)
-            return dict(value, output_id=record)
+            public_value = dict(value)
+            if isinstance(public_value.get("origin_nonce"), str):
+                public_value.pop("origin_nonce", None)
+            return dict(public_value, output_id=record)
         except (OSError, ValueError, IndexError, asyncio.TimeoutError) as exc:
             audit.update(record, status="failed", execution_state="unknown", error=str(exc))
             return {"error": "cleanup_unconfirmed", "execution_state": "unknown", "output_id": record}

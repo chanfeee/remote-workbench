@@ -1,68 +1,51 @@
-# 本机开发版与稳定版
+# 开发版与稳定版
 
-`main` 是 stable 源码主分支，`develop` 用于先行开发与验证。建议把源码开发环境和 Codex 日常使用的稳定版分开放。下面用 `~/opt/remote-workbench` 举例；它只是本机目录示例。Codex MCP 配置里的 `command`、manifest 和审计目录都要填写展开后的绝对路径。
+采用 `main` 开发主线、`stable` 稳定候选分支和固定版本 Release，具体合并/发行规则见[分支与发行](release-policy.zh-CN.md)。PR 通过 CI 后由维护者手动合并，不启用自动合并。
+
+## 开发安装
+
+在独立源码 checkout 中跟随 main：
+
+```sh
+git clone --branch main https://github.com/chanfeee/remote-workbench.git "$HOME/opt/remote-workbench/dev"
+cd "$HOME/opt/remote-workbench/dev"
+uv sync --frozen --extra dev --extra images
+```
+
+功能开发从 main 创建短分支，完成测试后向 main 提 PR。现有 develop 分支和未提交工作不自动重置、删除或搬移；先完成审阅与迁移，再切换日常开发 checkout。旧 `.local/develop/` 是安装目录名称，可以保留，不代表今后还维护另一条长期开发主线。
+
+Node 仅用于开发测试，无 npm 依赖；MCP 和远端运行继续使用 Python。开发安装可 editable，配置、状态和审计应独立于稳定安装。
+
+## 稳定安装
+
+stable 是移动的源码分支；正式使用固定 tag/Release 的 wheel，避免分支变化影响运行中的 MCP。每版创建独立目录，例如：
 
 ```text
-~/opt/remote-workbench/
-  develop/                         # develop 分支源码和开发用 .venv
-  stable/
-    config/hosts.yaml              # 稳定版 SSH 主机配置
-    workspace.json                 # 稳定版远端项目绑定
-    audit/                         # 稳定版本机审计记录
-    releases/<version>-<commit>/   # 每个稳定版本单独保留
-      dist/<wheel>.whl
-      runtime-requirements.txt
-      .venv/
+~/opt/remote-workbench/stable/
+  config/hosts.yaml
+  session-data/
+  releases/VERSION-COMMIT/
+    dist/
+    runtime-requirements.txt
+    .venv/
 ```
 
-## 开发版
-
-在源码 checkout 中使用 develop 分支和它自己的虚拟环境。`uv sync` 会把当前 checkout 安装到该环境，适合边改边测：
+从 GitHub Release 下载 wheel、runtime-requirements.txt 和 SHA256SUMS，核对 SHA256 后安装。将路径和文件名替换为实际发行资产：
 
 ```sh
-git clone https://github.com/chanfeee/remote-workbench.git "$HOME/opt/remote-workbench/develop"
-cd "$HOME/opt/remote-workbench/develop"
-git switch develop
-uv sync --locked --extra dev
+release_dir="$HOME/opt/remote-workbench/stable/releases/VERSION-COMMIT"
+uv venv --python 3.13 "$release_dir/.venv"
+uv pip install --python "$release_dir/.venv/bin/python" \
+  --constraints "$release_dir/runtime-requirements.txt" \
+  "$release_dir/dist/remote_workbench-VERSION-py3-none-any.whl"
+"$release_dir/.venv/bin/python" -I -c 'import importlib.metadata, remote_workbench; print(importlib.metadata.version("remote-workbench")); print(remote_workbench.__file__)'
 ```
 
-浏览器脚本的行为回归使用本机 Node.js 内置 VM，不需要安装 npm 依赖；本机缺少 Node 时 pytest 会跳过这组检查，CI 会先确认 Node 可用。Node 仅用于开发测试，运行 MCP 和远端执行仍使用原有 Python 环境。
+记录完整 commit、wheel SHA256、测试及实际客户端加载版本。稳定版不使用 `uv sync` / editable 安装，更新后保留旧 release 目录；回滚只切换启动器，不清理旧代码、日志或任务。
 
-开发版使用独立的主机配置、workspace manifest 和审计根目录。manifest 的 `config` 字段要显式指向开发版配置；`cwd` 指向远端模板目录，工具首次调用时会在模板旁创建该进程 session 专用副本，测试不会直接修改模板。稳定版和开发版可分别绑定日常与测试模板。测试时使用唯一 MCP 条目临时换成 develop 启动器；不需要固定查看器端口。每次启动进程都会得到新的 session UUID，进程内的本机审计、输出和查看页各自独立。
+## 一个 MCP，两个安装渠道
 
-## 稳定版安装
-
-稳定版从通过测试的源码 commit 构建 wheel，再安装到独立的新环境。每次发布都创建新的版本目录，例如 `~/opt/remote-workbench/stable/releases/0.2.3-a1b2c3d`；不要覆盖旧目录。
-
-在 develop checkout 内确认改动已提交、工作区干净，完成所需测试后，设置新版本目录并构建：
-
-```sh
-RELEASE="$HOME/opt/remote-workbench/stable/releases/0.2.3-a1b2c3d"
-mkdir -p "$RELEASE/dist"
-git rev-parse HEAD
-uv export --locked --no-dev --no-emit-project --no-hashes --output-file "$RELEASE/runtime-requirements.txt"
-uv build --wheel --out-dir "$RELEASE/dist"
-```
-
-将下面的 wheel 文件名换成 `dist` 中实际生成的文件名，然后先创建 venv，再从 wheel 普通安装。这里不要对 stable 目录运行 `uv sync`，也不要用 editable 安装：
-
-```sh
-uv venv --python 3.13 "$RELEASE/.venv"
-uv pip install --python "$RELEASE/.venv/bin/python" \
-  --constraints "$RELEASE/runtime-requirements.txt" \
-  "$RELEASE/dist/remote_workbench-0.2.3-py3-none-any.whl"
-```
-
-记录 `git rev-parse HEAD` 的完整 commit、wheel 的 SHA-256、版本号和测试结果。安装后检查包版本及导入位置，确认它位于该 release 的 `.venv` 下：
-
-```sh
-"$RELEASE/.venv/bin/python" -I -c 'import importlib.metadata, remote_workbench; print(importlib.metadata.version("remote-workbench")); print(remote_workbench.__file__)'
-shasum -a 256 "$RELEASE/dist/remote_workbench-0.2.3-py3-none-any.whl"
-```
-
-## Codex 只注册一个 MCP
-
-日常只保留一个名为 `remote-workbench` 的条目，指向已验证的 stable session 启动器。stable 和 develop 是两个独立安装渠道，不是两个需要同时注册的 MCP。服务器由同一服务按聊天切换，不为每台服务器再注册一个条目。
+Codex 只注册一个 `remote-workbench`。日常指向独立 stable 启动器，开发测试时替换同一项的 command 指向开发 checkout；不同时增加两套 MCP，不设置 full/compact 功能模式。
 
 ```toml
 [mcp_servers.remote-workbench]
@@ -71,41 +54,8 @@ args = []
 enabled = true
 ```
 
-启动器应固定 stable release 的 Python/入口，并明确传入 stable 的 `--config` 和 `--data-dir`。查看器默认使用 OS 分配的端口。新聊天默认本地；`workspace_info` 仅读本地身份和状态。需要远端时才选择主机及源目录，本地命令始终使用原生工具。
+启动器固定该安装的 Python，并明确传入对应 `--config`、`--data-dir` 和 `--viewer-port 0`。更换安装后重载客户端并核对实际版本；改变源码或 symlink 不会自动更新已运行进程。
 
-开发测试也使用同一个 MCP 名称：临时将这一个条目的 command 改为 develop session 启动器，测试结束后改回 stable。两个安装渠道各自使用独立状态；进程启动时由系统分配互不冲突的查看器端口，并使用不同的随机页面前缀。不额外增加 `remote-workbench-develop` 或项目级重复条目。日常新聊天不会因 develop 源码更新而切换版本。
+新聊天默认本地，只有明确选择服务器/目录后 MCP 才执行远程任务。本地原生工具保持本地；复用人工建立的 ControlMaster，不处理密码或 OTP。开发与稳定安装分别保留状态，但不同聊天的任务依然按原始目标恢复，不因分支或安装渠道切换而重跑命令。
 
-身份诊断通常由 `workspace_info` 提供的 `identity_source`、`client_session_id`、`mode` 和工作区 ID完成。缺少 threadId 时会明确拒绝路由。需要检查原始 metadata 键时，可在隔离的命令行测试中使用 `--identity-probe`；它不作为另一个常驻 MCP 注册。
-
-每次工具结果提供 **Remote Workbench 操作记录** 链接，内含当前实际地址。查看页不会接入占用首选端口的其他项目 HTML 服务；自动刷新也会验证实例身份。MCP 重启后需通过新的工具结果打开查看页，旧链接会过期。stable/develop 的日志和状态保留在各自目录；合并配置条目不合并不同聊天的数据，也不删除旧副本或 release。
-
-切换渠道或更新单一条目的启动器后，重载客户端 MCP。旧工具列表可能继续缓存，需确认当前条目是 `remote-workbench` 并包含 `workspace_use_local`。回滚时把同一条目的启动器改回保留的旧 release，不新增第二个 MCP。
-
-## 可选的对话级 Session 原型
-
-Develop 的 `0.3.0a1` 增加了 `remote-workbench-session`。它使用请求 metadata 中的 threadId 和本机 SQLite Registry，支持跨进程恢复及主机/模板切换，同时保留每个对话的私有远端工程副本。它使用单独的 `--data-dir`，首次工作区未绑定；不会继承固定 workspace manifest 的默认目标。详见 [Session 原型](session-prototype.zh-CN.md)。
-
-启用开发原型前，需要在实际客户端验证 `_meta.threadId`；SDK 测试客户端主动传入 metadata 的成功结果不能代替这一检查。日常只使用一个固定 stable 入口，develop 验证不自动推广到日常版。
-
-## `0.3.0a6` 起的混合工作入口与推广顺序
-
-本地和多个服务器协作时，使用 `remote-workbench-session`，不再将固定 `--workspace` 入口作为所有聊天的默认远端环境。日常 MCP 可保持可见，但每个新 thread 都从本地模式开始；需要远端时显式选择配置中的主机和绝对源目录。本地命令始终使用本地工具，远端选择只影响 Remote Workbench 工具；`workspace_use_local` 可清除当前绑定并保留原任务和副本。
-
-固定 workspace 入口仍可供明确选择单个远端模板的旧流程使用。其 `workspace_info()` 现在仅查看本地配置；`probe=true` 才检查远端，避免为了查看信息而准备目录。
-
-推广顺序是：develop 通过本机回归后提交、推送，等待对应提交的 GitHub CI 通过；再将该固定提交快进到 main，并核对 main CI。从 main 的同一固定提交构建 wheel、独立验收并创建本地 stable release，最后手动切换日常启动器。stable 不使用 editable 安装，不因 develop 的后续修改自动更新；没有自动定时升级。真实集群测试与本机模拟验收分开记录。
-
-日常入口示例：
-
-```toml
-[mcp_servers.remote-workbench]
-command = "/absolute/path/to/stable/releases/VERSION-COMMIT/venv/bin/remote-workbench-session"
-args = ["--config", "/absolute/path/to/stable/hosts.yaml", "--data-dir", "/absolute/path/to/stable/session-data"]
-enabled = true
-```
-
-`hosts.yaml` 提供可选主机，不设置自动绑定的模板；`--data-dir` 与 develop 分开。旧固定 workspace 的进程 UUID 没有可信 threadId 映射，因此旧副本和记录保留，但不会静默转成新聊天的默认远端绑定。缺少 threadId 时新入口拒绝远端路由，不能回退到固定默认服务器。更换启动器后重载 App 的 MCP，再在新聊天验证 `workspace_info.mode=local`。
-
-查看页默认通过 `--viewer-port 0` 请求 OS 分配空闲端口。每个进程的页面地址带有独立随机前缀；即使端口后来被其他本地项目复用，旧页面和自动刷新也不能读取新实例的审计数据。需要固定首选端口时可以显式设置，但占用时会自动改用空闲端口。
-
-`0.3.0a7` 的查看页隔离实现与交接状态见[Develop 交接记录](develop-handoff.zh-CN.md)。
+操作记录页只读、按进程实例隔离、自动刷新；使用返回的新链接，不按固定端口猜地址。旧文档中的 copy/session 原型与 a7 查看器交接是历史记录，保留于 [Session 原型](session-prototype.zh-CN.md)、[旧 Develop 交接](develop-handoff.zh-CN.md)；实际目录行为以所安装版本及[目录契约](workspace-mode-contract.zh-CN.md)为准。

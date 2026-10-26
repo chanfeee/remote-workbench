@@ -1,6 +1,6 @@
 [project]
 name = "remote-workbench"
-version = "0.3.0a10"
+version = "0.3.0a14"
 description = "Local MCP control for remote SSH workspaces with bounded output and readable audit diffs"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -46,6 +46,7 @@ artifacts = ["remote_workbench/scripts/*.sh"]
 include = [
     "/remote_workbench",
     "/tests",
+    "/scripts",
     "/docs",
     "/.github",
     "/.gitignore",
