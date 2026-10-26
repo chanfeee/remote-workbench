@@ -130,6 +130,7 @@ class SSHExecutor:
         output_budget: int | None = None,
         trace: bool = False,
         display_command: str | None = None,
+        batch: bool = False,
     ) -> SSHResult:
         """Run a command on the remote host.
 
@@ -143,6 +144,11 @@ class SSHExecutor:
             SSHResult with stdout, stderr, exit code, and timeout flag.
         """
         cwd = cwd if cwd is not None else self.config.default_cwd
+        if batch:
+            from remote_workbench.command_spec import validate_batch
+            if input_data is None or len(input_data) > 1048576:
+                raise ValueError('Batch requires at most 1 MiB of JSON stdin')
+            validate_batch(json.loads(input_data))
         timeout = timeout if timeout is not None else self.config.command_timeout
         if timeout <= 0:
             raise ValueError("timeout must be positive")
@@ -155,7 +161,9 @@ class SSHExecutor:
             host=self.config.ssh_target, cwd=cwd, command=display_command or command, status="starting",
             stdin_bytes=len(input_data or b""), stdin_sha256=hashlib.sha256(input_data or b"").hexdigest())
         audit.add_child(audit.operation_id.get(), record_id)
-        wrapped = self._wrap_command(command, cwd, record_id, trace, timeout, len(input_data or b""))
+        wrapped = self._wrap_command(command, cwd, record_id, trace, timeout, len(input_data or b""), batch=batch)
+        if batch:
+            audit.update(record_id, command_batch=json.loads(input_data))
         audit.update(record_id, wrapped_command=wrapped, shell_trace=trace)
         if display_command is not None:
             audit.update(record_id, executed_command=command)
@@ -488,7 +496,7 @@ class SSHExecutor:
         self._last_check_ok = False
 
     def _wrap_command(self, command: str, cwd: str, record_id: str = "", trace: bool = False,
-                      timeout: int | None = None, stdin_bytes: int = 0) -> str:
+                      timeout: int | None = None, stdin_bytes: int = 0, batch: bool = False) -> str:
         """Start the configured account shell, without assuming its syntax."""
         from remote_workbench.remote_shell import python_command
         markers = None
@@ -500,8 +508,10 @@ class SSHExecutor:
         arguments = dict(command=command, cwd=cwd, preamble=self.config.preamble,
                          markers=markers, trace=trace, environment=environment,
                          policy=self.config.task_policy(), timeout=timeout or self.config.command_timeout,
-                         task_id=task_id, stdin_bytes=stdin_bytes)
+                         task_id=task_id, stdin_bytes=stdin_bytes, batch=batch)
         bootstrap = Path(__file__).with_name("remote_shell.py").read_text()
+        if batch:
+            bootstrap += '\nBATCH_RUNNER_SOURCE = ' + repr(Path(__file__).with_name('batch_runner.py').read_text())
         bootstrap += "\n" + Path(__file__).with_name("remote_task.py").read_text()
         bootstrap += "\n_settings = " + repr(arguments) + "\n"
         if self.remote_state_dir:

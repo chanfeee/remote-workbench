@@ -1022,7 +1022,7 @@ wheels = [
 
 [[package]]
 name = "remote-workbench"
-version = "0.3.0a14"
+version = "0.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "asyncssh" },

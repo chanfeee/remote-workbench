@@ -66,6 +66,7 @@ class ServerConfig:
 
     default_host: str = ""
     hosts: dict[str, HostConfig] = field(default_factory=dict)
+    source_path: str | None = None
 
     def get_host(self, name: str | None = None) -> HostConfig:
         """Get a host config by name, falling back to default."""
@@ -148,7 +149,7 @@ def load_config(path: str | Path | None = None) -> ServerConfig:
             f"Available: {', '.join(hosts.keys())}"
         )
 
-    return ServerConfig(default_host=default_host, hosts=hosts)
+    return ServerConfig(default_host=default_host, hosts=hosts, source_path=str(path.resolve()))
 
 
 # Cached config singleton

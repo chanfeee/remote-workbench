@@ -26,6 +26,11 @@ def base_root() -> Path:
     ))
 
 
+def current_metadata() -> dict:
+    """A copy of the current request identity, for scoped local artifacts."""
+    return dict(_metadata.get() or {})
+
+
 @contextmanager
 def scoped_root(path):
     """Bind audit operations in this context to a session-specific directory.

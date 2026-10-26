@@ -35,6 +35,7 @@ _TOOL_TITLES = {
     "workspace_snapshot": "查看工程快照",
     "session_identity_probe": "检查对话身份",
     "workspace_switch": "切换工作区",
+    "validate_workspace": "检查实际工作目录",
     "prepare_workspace": "创建 session 工程副本",
     "ssh_check_connection": "检查远端连接",
     "ssh_run_background": "启动后台任务",

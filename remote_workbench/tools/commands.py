@@ -2,6 +2,7 @@
 from __future__ import annotations
 import asyncio
 import inspect
+import json
 import math
 import re
 import time
@@ -11,12 +12,15 @@ from remote_workbench.server import mcp, require_connection, get_executor
 from remote_workbench.remote_client import edit
 from remote_workbench import job_collector
 from remote_workbench.compute_review import check_compute_review
+from remote_workbench.call_arguments import command_text, validate_call_arguments
+from remote_workbench.command_spec import Command
+from remote_workbench.remote_program import program_command
 
 _SAFE_JOB_ID = re.compile(r"^[a-zA-Z0-9_-]{1,80}$")
 
 
 @mcp.tool()
-async def ssh_run(command: str, cwd: str | None = None, timeout: int | None = None,
+async def ssh_run(command: Command, cwd: str | None = None, timeout: int | None = None,
                   host: str | None = None, max_bytes: int = 16384, trace: bool = False,
                   compute_review: dict | None = None) -> dict:
     """Execute using the remote default shell's interactive login configuration.
@@ -28,17 +32,34 @@ async def ssh_run(command: str, cwd: str | None = None, timeout: int | None = No
     Substantial computation requires explicit user confirmation of command,
     concurrency and environment; record it in compute_review. No OS PID cap.
     """
+    validate_call_arguments("exec_command", {"command": command, "cwd": cwd, "timeout": timeout, "max_bytes": max_bytes})
+    display = command_text(command)
     config = get_executor(host).config
-    pending = check_compute_review(command, cwd or config.default_cwd, config.ssh_target,
-                                   compute_review, config.compute_review_threshold)
-    if pending:
-        return pending
+    checked_commands = command['commands'] if isinstance(command, dict) else [command]
+    for item in checked_commands:
+        pending = check_compute_review(command_text(item), cwd or config.default_cwd, config.ssh_target,
+                                       compute_review, config.compute_review_threshold)
+        if pending:
+            return pending
     executor = await require_connection(host)
-    result = await executor.run(command, cwd=cwd, timeout=timeout, output_budget=max_bytes, trace=trace)
-    return {"stdout": result.stdout, "stderr": result.stderr, "exit_code": result.exit_code,
+    if isinstance(command, dict):
+        result = await executor.run('argv batch', cwd=cwd, timeout=timeout, output_budget=max_bytes,
+                                    trace=trace, display_command=display, batch=True,
+                                    input_data=json.dumps(command, ensure_ascii=False).encode('utf-8'))
+    elif isinstance(command, list):
+        result = await executor.run(program_command(command), cwd=cwd, timeout=timeout,
+                                    output_budget=max_bytes, trace=trace, display_command=display)
+    else:
+        result = await executor.run(command, cwd=cwd, timeout=timeout, output_budget=max_bytes, trace=trace)
+    value = {"stdout": result.stdout, "stderr": result.stderr, "exit_code": result.exit_code,
             "timed_out": result.timed_out, "truncated": result.truncated,
             "output_id": result.output_id, "execution_state": result.execution_state,
             "remote_task": result.remote_task}
+    if isinstance(command, dict):
+        value['steps'] = (result.remote_task or {}).get('batch', [])
+        value['batch_state'] = (result.remote_task or {}).get('batch_state', 'unknown')
+        value['remote_task'] = {k:v for k,v in (result.remote_task or {}).items() if k not in {'batch', 'batch_state'}}
+    return value
 
 
 @mcp.tool()

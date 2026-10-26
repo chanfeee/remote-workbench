@@ -230,6 +230,10 @@ def _value(result):
 
 
 async def _call(client: ClientSession, tool: str, arguments: dict | None = None):
+    from remote_workbench.tool_interface import TOOL_NAMES
+    if tool not in TOOL_NAMES and tool != "workspace_tools":
+        arguments = {"tool": tool, "arguments": arguments or {}}
+        tool = "workspace_tools"
     result = await client.call_tool(tool, arguments or {}, meta={"threadId": THREAD_ID})
     return _value(result)
 
@@ -453,13 +457,13 @@ async def test_default_execution_paths_leave_legacy_test_history_untouched(
                     "+native-after\n"
                     "*** End Patch\n"
                 )
-                context_check = await _call(client, "apply_patch", {
+                context_check = await _call(client, "workspace_tools", {"tool":"apply_patch", "arguments":{
                     "patch": context_patch, "check_only": True,
-                })
+                }})
                 assert context_check.get("success") is True and context_check.get("check_only") is True
                 native_before = await _call(client, "read_file", {"path": "native-patch.txt"})
                 assert "native-before" in native_before.get("content", "")
-                context_apply = await _call(client, "apply_patch", {"patch": context_patch})
+                context_apply = await _call(client, "workspace_tools", {"tool":"apply_patch", "arguments":{"patch":context_patch}})
                 assert context_apply.get("success") is True and context_apply.get("check_only") is False
                 native_after = await _call(client, "read_file", {"path": "native-patch.txt"})
                 assert "native-after" in native_after.get("content", "")

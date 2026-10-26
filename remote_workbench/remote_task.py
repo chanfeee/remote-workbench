@@ -234,6 +234,48 @@ def forward_task_output(reader, name, root, marker):
             output.flush()
 
 
+def batch_progress(root, nonce, count=None):
+    """Read only bounded structured progress, never infer step results from stdout."""
+    try:
+        path = root / 'batch-progress.json'
+        if path.is_symlink() or path.stat().st_size > 131072:
+            raise ValueError('Invalid batch progress')
+        with path.open('rb') as source:
+            data = source.read(131073)
+        value = json.loads(data)
+        if not isinstance(value, dict):
+            raise ValueError('Invalid batch progress')
+        rows = value['steps']
+        if (len(data) > 131072 or value.get('nonce') != nonce or value.get('version') != 1
+                or type(value.get('complete')) is not bool or not isinstance(rows, list) or not 1 <= len(rows) <= 32
+                or (count is not None and len(rows) != count)):
+            raise ValueError('Invalid batch identity')
+        result = []
+        for index, row in enumerate(rows):
+            if not isinstance(row, dict):
+                raise ValueError('Invalid batch step')
+            state, code = row['state'], row['exit_code']
+            if (row.get('index') != index or state not in {'not_started','running','finished','not_run'}
+                    or (code is not None and type(code) is not int)
+                    or (state == 'finished') != (code is not None)
+                    or (value['complete'] and state in {'not_started', 'running'})
+                    or type(row.get('elapsed_ms')) is not int or row['elapsed_ms'] < 0):
+                raise ValueError('Invalid batch step')
+            item = {k: row[k] for k in ('index', 'state', 'exit_code', 'elapsed_ms')}
+            item['state'] = 'unknown' if state == 'running' else 'not_run' if state == 'not_started' else state
+            if type(row.get('signal')) is int:
+                item['signal'] = row['signal']
+            if isinstance(row.get('error'), str):
+                item['error'] = row['error']
+            if isinstance(item.get('error'), str) and len(item['error']) > 160:
+                item['error'] = item['error'][:160]
+                item['error_truncated'] = True
+            result.append(item)
+        return {'batch_state': 'finished' if value['complete'] else 'unknown', 'batch': result}
+    except (OSError, ValueError, KeyError, TypeError):
+        return {'batch_state': 'unknown', 'batch': [], 'batch_reason': 'progress_unavailable'}
+
+
 def supervise_task(settings):
     """Run one workload, with an independent deadline and foreground lease."""
     policy = settings["policy"]
@@ -271,17 +313,33 @@ def supervise_task(settings):
     received_signal = []
     threads = []
     old_handlers = {}
+    batch_count = None
     for number in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         old_handlers[number] = signal.signal(number, lambda n, f: received_signal.append(n))
     deadline = time.monotonic() + timeout
     try:
         if not policy["execution_enabled"]:
             raise ValueError("Remote execution is disabled")
+        if ('.remote-workbench-sessions' in
+                Path(settings['cwd']).expanduser().resolve().parts):
+            raise ValueError('Managed project copies are not direct working directories; select the original source')
         data = read_task_input(settings.get("stdin_bytes", 0), deadline) if foreground else b""
+        command = settings['command']
+        if settings.get('batch'):
+            # The argv JSON arrives on stdin, never as model-authored shell source
+            # or a large SSH argv. Only this fixed runner is executable code.
+            batch_spec = json.loads(data)
+            batch_count = len(batch_spec['commands'])
+            save_task_json(root / 'batch-input.json', batch_spec)
+            source = globals().get('BATCH_RUNNER_SOURCE')
+            if source is None:
+                source = Path(__file__).with_name('batch_runner.py').read_text()
+            command = python_command(source + '\nraise SystemExit(run_batch(json.load(open(' +
+                repr(str(root / 'batch-input.json')) + ')), ' + repr(str(root / 'batch-progress.json')) + ', ' + repr(task_id) + '))\n')
         with tempfile.TemporaryFile() as input_file:
-            input_file.write(data)
+            input_file.write(b'' if settings.get('batch') else data)
             input_file.seek(0)
-            spec = login_spec(settings["command"], settings["cwd"], preamble=settings.get("preamble", ""),
+            spec = login_spec(command, settings["cwd"], preamble=settings.get("preamble", ""),
                               markers=settings.get("markers"), trace=settings.get("trace", False),
                               environment=settings.get("environment"))
             # Real exec preserves the account shell; no preload/spawn hooks.
@@ -373,6 +431,8 @@ def supervise_task(settings):
             code = 126
         code = code if code >= 0 else 128 - code
         final = dict(origin, state="finished", reason=reason, exit_code=code, **details)
+        if settings.get('batch'):
+            final.update(batch_progress(root, task_id, batch_count))
         publish(final)
         with open(root / "exit_code.tmp", "w", opener=lambda p, f: os.open(p, f, 0o600)) as output:
             output.write(str(code))
