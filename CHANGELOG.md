@@ -5,6 +5,7 @@
 - Distinguish missing edit files, directories, symbolic links, noncanonical paths and protected Git metadata. Missing-file errors explain how to create a file without requesting a snapshot first.
 - Show readable worker failures in the audit viewer's main output, including existing records, while retaining the original protocol output in raw details and output retrieval.
 - Keep long paths and operation headings within their containers by allowing text wrapping and flex-item shrinking; allow section labels to wrap in narrow layouts.
+- Add an explicit local stable updater that builds a fixed Git commit, installs locked dependencies, verifies MCP and the viewer, and switches current only after success; retain prior installations and state.
 
 ## 0.4.1 — workspace binding and deployment fixes
 

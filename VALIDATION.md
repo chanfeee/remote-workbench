@@ -1,10 +1,15 @@
 # Validation status
 
+## Local stable update command (2026-10-27)
+
+- **16 passed** across updater and release-check tests. Cases cover building the committed ref instead of dirty checkout contents, preserving the current installation and state on build/install/verification failures, idempotent verified updates, and refusing unsafe activation targets.
+- Updates remain explicit. The updater does not move Git branches, fetch code, change Codex configuration, restart existing clients, or execute SSH commands. Its installed smoke check verifies imports, MCP stdio and the local viewer before switching the current symlink.
+
 ## Edit errors and viewer overflow (2026-10-27, unreleased)
 
 - Worker error and viewer-output changes passed the complete local regression: **695 passed in 187.76 seconds**. Coverage distinguishes missing edit files, non-regular paths, symlink components and protected Git metadata, and preserves raw worker output while showing readable errors in the viewer.
 - After the final CSS changes, the viewer HTTP and browser-script tests passed: **33 passed in 10.25 seconds**. Real-browser checks confirmed that long paths and titles wrap within their containers at narrow component widths and that the complete viewer no longer acquires horizontal overflow from its heading.
-- These are source changes only; the existing 0.4.1 fixed installation is unchanged. No release tag or new deployed version is created for this update.
+- No release tag is created for these source updates; installing a fixed source commit remains a separate, explicit local deployment step.
 
 ## 0.4.1 deployment candidate (2026-10-27)
 

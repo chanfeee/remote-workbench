@@ -43,6 +43,20 @@ uv pip install --python "$release_dir/.venv/bin/python" \
 
 记录完整 commit、wheel SHA256、测试及实际客户端加载版本。稳定版不使用 `uv sync` / editable 安装，更新后保留旧 release 目录；回滚只切换启动器，不清理旧代码、日志或任务。
 
+### 更新已有的本地 stable 安装
+
+已有 `config/hosts.yaml` 且启动器通过 `current/venv/bin/remote-workbench-session` 加载时，可以在源码仓库中运行（需要 Python 3.11+ 和 uv）：
+
+```sh
+python3 scripts/update_local_stable.py
+```
+
+默认安装本地 `stable` 分支，目标为仓库内 `.local/stable`。其他位置使用 `--install-root /absolute/stable`，也可用 `--ref` 明确选择已存在的提交或本地 ref。脚本不 fetch、不移动分支、不读取未提交源码；先更新本地 stable，再运行此命令。
+
+更新会归档确定提交，构建 wheel，按该提交的锁文件安装依赖，并验证独立安装的导入、MCP stdio 和本机查看器。只有验证成功才原子切换 `current`；配置和历史状态保留。重复安装同一提交仅复核现有安装，不重新构建。失败候选保留供检查，旧入口保持原样。`release.json` 保存来源 commit、wheel SHA256 和前一个安装位置，回滚时可将 `current` 重新指向该位置。
+
+这是本地部署便利入口，不会创建 tag 或 GitHub Release，也不改变正式发行流程。更新后仍需重载 MCP；脚本不会中断现有聊天或其任务。
+
 ## 一个 MCP，两个安装渠道
 
 Codex 只注册一个 `remote-workbench`。日常指向独立 stable 启动器，开发测试时替换同一项的 command 指向开发 checkout；不同时增加两套 MCP，不设置 full/compact 功能模式。
