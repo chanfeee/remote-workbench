@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.1 — workspace binding and deployment fixes
+
+- Bind ordinary build/run directories without probing Git. Snapshot-backed editing no longer needs a Git worktree or Git executable and retains per-operation diffs, conflict protection and atomic file writes.
+- Allow explicit patch text in non-Git directories using the installed Git program without creating a repository; Git status/diff remain explicit repository operations.
+- Show the operation-record link immediately after the first binding, before remote commands; retain combined calls for later bindings.
+- Cover direct binding of repositories containing Git submodules and selecting submodule directories without project snapshots.
+
 
 ## 0.4.0 — actual directories and structured operations
 

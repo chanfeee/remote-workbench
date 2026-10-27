@@ -1,8 +1,8 @@
 """Compile context patches to checked Git patches without model-written counts.
 
 This stdlib-only source is also sent to the remote Python worker. It never
-executes a command or writes a file; the worker validates/applies the resulting
-multi-file patch once with Git. Matching is exact and ambiguous hunks fail.
+executes a command or writes a file. The worker checks generated diffs before
+applying changes. Matching is exact and ambiguous hunks fail.
 """
 import difflib
 import json

@@ -93,7 +93,7 @@ TOOLS = [
     ("fetch_image", files.ssh_fetch_image, "Fetch a remote PNG/JPG/PDF/SVG to a private local cache. PDF page is 1-based. Show returned image_markdown in chat; paths and metadata only, no base64. PDF/SVG previews require the local images extra."),
     ("write_file", files.ssh_write_file, "Atomically write remote UTF-8 content. Optional expected_sha256 rejects stale edits."),
     ("patch_file", files.ssh_patch_file, "Apply unique old/new replacements, or sequential edits=[{old,new}], remotely. Optional expected_sha256 and check_only; returns this edit's diff."),
-    ("apply_patch", patch.ssh_apply_patch, "Apply patch text or an array of lines: *** Begin Patch context format or unified Git diff. Prefer line arrays; no join/escaping wrapper needed. Update existing files in place. Paths use repo root; check_only validates without writing."),
+    ("apply_patch", patch.ssh_apply_patch, "Apply patch text or an array of lines: *** Begin Patch context format or unified Git diff. Prefer line arrays; no join/escaping wrapper needed. Update existing files in place. Patch text paths use the Git root if present, otherwise cwd; snapshot edits need no Git. check_only validates without writing."),
     ("list_dir", files.ssh_list_dir, "List remote entries. Relative paths start at the workspace root."),
     ("grep", search.ssh_grep, "Search remote file contents by regex, with bounded results."),
     ("find_files", search.ssh_find_files, "Find remote paths by filename glob, type and depth, with bounded results."),
@@ -240,6 +240,7 @@ def create_server(workspace: Workspace, *, viewer_url: str | None = None, sessio
         "This is a default directory, not a filesystem sandbox."
         + CALL_SOURCE_INSTRUCTIONS + REVIEW_INSTRUCTIONS
         + (f" Local audit viewer: {viewer_url}. Every tool result supplies operation_log. "
+           "Show this link in a user-facing progress update before the first remote operation, then reuse it while work runs. "
            "Whenever you use these tools, include its Markdown link with the exact bold title "
            "'Remote Workbench 操作记录' in your user-facing update and final reply. "
            "Use the returned link directly; no separate workspace_info call is needed for it."

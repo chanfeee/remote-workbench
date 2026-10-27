@@ -6,7 +6,7 @@
 
 `remote-workbench-session` 的 `workspace_switch(host, cwd)`：
 
-- 远端 `realpath` 规范化后直接使用该目录，不创建代码副本，不采集初始项目内容基线。仅检查目录及 Git 根元数据，不扫描项目内容。
+- 远端 `realpath` 规范化后直接使用该目录，不创建代码副本，不采集初始项目内容基线。只规范化目录并获取运行状态所需的 home，不探测 Git，也不扫描项目内容。
 - 不再接受 `directory_mode` 参数，不再提供 copy 模式或副本交付接口。
 - 新聊天默认本地。切换目录只影响本 MCP，原生本地工具保持本地。
 - `source_cwd` 与 `cwd` 均指选定的实际目录；`directory_mode="direct"` 和 `project_isolated=false` 只作为结果事实保留。
@@ -54,4 +54,4 @@ python -m remote_workbench.resource_claims --data-dir /absolute/local/state --re
 
 ## 独立的执行位置
 
-选定工作区是默认cwd，不规定工程布局。命令可显式选择其他相对或绝对cwd，并引用其他路径下的代码、解释器、环境脚本和结果。MCP不推断目录角色、不自动激活环境或复制依赖。代码/结果不必处在同一Git仓库；只有Git相关编辑接口要求其各自目标为工作树。实际命令cwd与后台job origin保持明确。
+选定工作区是默认cwd，不规定工程布局。命令可显式选择其他相对或绝对cwd，并引用其他路径下的代码、解释器、环境脚本和结果。MCP不推断目录角色、不自动激活环境或复制依赖。代码/结果不必处在同一Git仓库；`git_status` / `git_diff` 只适用于 Git 工程；普通受管编辑在非 Git 目录中仍记录逐次 diff。快照编辑无需 Git；显式文本补丁需要 Git 程序但不要求目录为仓库。实际命令cwd与后台job origin保持明确。

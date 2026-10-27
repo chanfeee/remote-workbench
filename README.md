@@ -89,6 +89,8 @@ The `0.4.0` source binds the normalized actual directory. There is no project-co
 
 Chat isolation applies to bindings and records; direct mode allows chats to share code. Its runtime state lives outside the code directory. Cooperative write coordination covers overlapping selected directories for updated MCP processes sharing one local state directory. It does not isolate external terminals, other controllers, or arbitrary writes outside the selected directory. See the [directory mode contract](docs/workspace-mode-contract.zh-CN.md) for scope and recovery.
 
+**Local unreleased fix:** Workspace roots, build directories and run directories do not need to be Git repositories. Snapshot edits and file edits retain per-operation diffs in local records without Git; only Git status/diff needs a repository. Binding does not probe Git or initialize a repository.
+
 ## Commands, records, and images
 
 Tool replies include bounded output and a **Remote Workbench 操作记录** link for the agent to show in chat. Full command output and diffs remain in local records and can be read in pages with `read_output`.

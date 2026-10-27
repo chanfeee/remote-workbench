@@ -278,7 +278,7 @@ async def test_git_status_special_paths_and_staged_changes(local):
 
 
 @pytest.mark.asyncio
-async def test_eof_diff_and_patch_outside_worktree_rejected(local):
+async def test_eof_diff_and_patch_path_escape_rejected(local):
     _,path=local
     target=path/'text';target.write_text('before')
     value=await files.ssh_patch_file(str(target),old='before',new='after')

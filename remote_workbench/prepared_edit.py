@@ -92,7 +92,7 @@ def materialize(executor, edits):
             raise ValueError('Original edit snapshot changed')
         path, repo = manifest['path'], manifest['repository']
         if repository is not None and repository != repo:
-            raise ValueError('Apply prepared edits from one Git repository per call')
+            raise ValueError('Apply prepared edits from one edit root per call')
         repository = repo
         relative = Path(path).relative_to(repo)
         if not relative.parts or '..' in relative.parts or '.git' in {p.casefold() for p in relative.parts} or path in guards:

@@ -1,6 +1,6 @@
 [project]
 name = "remote-workbench"
-version = "0.4.0"
+version = "0.4.1"
 description = "Local MCP control for remote SSH workspaces with bounded output and readable audit diffs"
 readme = "README.md"
 license = { file = "LICENSE" }

@@ -1,5 +1,19 @@
 # Validation status
 
+## 0.4.1 deployment candidate (2026-10-27)
+
+- Complete regression in the normal local process environment: **685 passed in 183.58 seconds**. The restricted sandbox cannot run the worker/loopback acceptance tests reliably; its failures were not treated as product test results.
+- Added direct-binding coverage for a repository containing a Git gitlink and for selecting its submodule directory; binding does not enumerate Git files or create session copies.
+- First-binding guidance now separates binding from remote work so the operation-record link can be shown before commands start. This changes agent guidance, not MCP tool-result streaming.
+- Version advanced to 0.4.1; the existing v0.4.0 tag is preserved. Wheel and source-distribution contents were checked to exclude private local configuration, audit data and reports.
+
+## Non-Git workspace editing (2026-10-27, local and unpublished)
+
+- Baseline: main `328d256`, preserving the published `v0.4.0` tag and independent stable installation. Directory binding no longer probes Git. Snapshot-backed reads/edits support ordinary directories without the Git executable; explicit patch text uses Git apply without requiring a repository.
+- Added seven acceptance cases: a plain workspace containing a separately managed Git source plus build/run directories; bind-and-read editing, restart, command execution and actual viewer diff endpoints; explicitly selected external run scripts; context/unified patch previews; Git-free snapshot application and stale-content conflicts; no Git probe on binding; protected Git metadata.
+- Final complete local regression: **684 passed in 210.81 seconds**. Modified remote source parses as Python 3.9 and `git diff --check` passes. Verification used temporary local workers and local viewer HTTP only. No whole-project/package SHA256 verification, real server execution, App-loaded acceptance, release build, publication or CI run was performed for this fix.
+
+
 ## Actual-directory-only development (0.4.0, 2026-10-26)
 
 - Baseline: `develop` at `c7571b0`, preserving pre-existing uncommitted work. Session and fixed-workspace entry points use the selected actual directory. `workspace_switch(host, cwd)` no longer accepts `directory_mode`; copy preparation, copy delivery tools and copy-origin recovery exceptions have been removed.

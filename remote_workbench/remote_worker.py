@@ -129,15 +129,30 @@ def edit(request):
 
 def apply_patch(request):
     patch = request["patch"].encode("utf-8")
-    top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True)
-    if top.returncode:
-        return {"error": "not_repository", "message": top.stderr.decode("utf-8", "replace")}
-    repo = Path(os.fsdecode(top.stdout).strip())
+    prepared = request.get('prepared_contents')
+    expected_repo = request.get('expected_repository')
+    if prepared is not None:
+        # Snapshot edits already identify their exact root and guarded files.
+        # Their content/diff validation and atomic writes need no Git process.
+        if not isinstance(expected_repo, str) or not expected_repo.startswith('/'):
+            raise ValueError('Prepared edits require an absolute edit root')
+        repo = Path(expected_repo)
+        if repo.resolve() != repo or not repo.is_dir():
+            raise ValueError('Prepared edit root changed or is unavailable')
+    else:
+        # Git apply also operates on ordinary directories, without git init.
+        # Preserve repository-relative paths for existing unified/context calls.
+        try:
+            top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True)
+        except FileNotFoundError:
+            return {'error': 'git_unavailable',
+                    'message': 'Patch text needs the Git executable, not a repository; use read_file(for_edit=true) and edits for Git-free editing'}
+        repo = Path(os.fsdecode(top.stdout).strip()) if top.returncode == 0 else Path.cwd()
     os.chdir(repo)
     with lock(repo / ".remote-workbench-patch"):
         expected_repo = request.get('expected_repository')
         if expected_repo is not None and str(repo) != expected_repo:
-            return {'error': 'edit_target_mismatch', 'message': 'Prepared edit belongs to another repository'}
+            return {'error': 'edit_target_mismatch', 'message': 'Prepared edit belongs to another edit root'}
         guards = request.get('expected_files')
         originals = {}
         if guards is not None:
@@ -148,8 +163,8 @@ def apply_patch(request):
                 try:
                     relative = path.relative_to(repo)
                 except ValueError:
-                    raise ValueError('Prepared edit path is outside the repository')
-                if (not relative.parts or any(p == '..' or p.casefold() == '.git' for p in relative.parts)
+                    raise ValueError('Prepared edit path is outside the edit root')
+                if (not relative.parts or '..' in relative.parts or any(p.casefold() == '.git' for p in path.parts)
                         or path.resolve() != path or not re.fullmatch('[a-f0-9]{64}', str(expected))):
                     raise ValueError('Unsafe prepared edit guard')
                 fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -180,15 +195,19 @@ def apply_patch(request):
             if not patch:
                 return {"success": True, "check_only": bool(request.get("check_only")),
                         "summary": "", "patch_sha256": sha(patch), "normalized_patch": ""}
-        # Refuse paths outside the worktree using git's default path protections.
-        check = subprocess.run(["git", "apply", "--check", "--whitespace=nowarn", "-"], input=patch, capture_output=True)
-        if check.returncode:
-            return {"error": "patch_conflict", "message": check.stderr.decode("utf-8", "replace")}
-        summary = subprocess.run(["git", "apply", "--numstat", "-"], input=patch, capture_output=True, check=True)
-        if not request.get("check_only"):
-            if prepared is not None:
-                # Git validates the whole patch first. The existing atomic writer
-                # preserves full permissions/ownership, not just Git's executable bit.
+        if prepared is not None:
+            # All guards and the generated patch were checked before any write.
+            # Record this edit's line changes without a repository or Git scan.
+            rows = []
+            for name, content in prepared.items():
+                diff = list(difflib.unified_diff(originals[name].decode('utf-8').splitlines(keepends=True),
+                                                 content.splitlines(keepends=True)))
+                added = sum(line.startswith('+') for line in diff[2:])
+                removed = sum(line.startswith('-') for line in diff[2:])
+                if diff:
+                    rows.append(str(added) + '\t' + str(removed) + '\t' + str(Path(name).relative_to(repo)))
+            summary_text = '\n'.join(rows) + ('\n' if rows else '')
+            if not request.get('check_only'):
                 applied = []
                 for name, content in prepared.items():
                     after = content.encode('utf-8')
@@ -200,11 +219,20 @@ def apply_patch(request):
                                     'applied_paths': applied,
                                     'pending_paths': [p for p in prepared if p not in applied]}
                         applied.append(name)
-            else:
+        else:
+            # Git's normal path/context protections apply in both worktrees and
+            # plain directories. No index, repository creation or project scan.
+            check = subprocess.run(["git", "apply", "--check", "--whitespace=nowarn", "-"], input=patch, capture_output=True)
+            if check.returncode:
+                return {"error": "patch_conflict", "message": check.stderr.decode("utf-8", "replace")}
+            summary = subprocess.run(["git", "apply", "--numstat", "-"], input=patch, capture_output=True, check=True)
+            summary_text = summary.stdout.decode('utf-8', 'replace')
+            if not request.get('check_only'):
                 result = subprocess.run(["git", "apply", "--whitespace=nowarn", "-"], input=patch, capture_output=True)
                 if result.returncode:
                     return {"error": "apply_failed", "message": result.stderr.decode("utf-8", "replace")}
-        result = {"success": True, "check_only": bool(request.get("check_only")), "summary": summary.stdout.decode("utf-8", "replace"), "patch_sha256": sha(patch)}
+        result = {"success": True, "check_only": bool(request.get("check_only")), "summary": summary_text,
+                  "patch_sha256": sha(patch), "changed": bool(summary_text)}
         if native:
             result["normalized_patch"] = patch.decode("utf-8")
         return result
@@ -234,8 +262,9 @@ def read_lines(request):
     path = Path(request["path"]).expanduser()
     if request.get('for_edit'):
         path = path.absolute()
-        if path.resolve() != path or not path.is_file():
-            raise ValueError('Prepared edits require a regular file without symbolic-link components')
+        if (path.resolve() != path or not path.is_file()
+                or any(part.casefold() == '.git' for part in path.parts)):
+            raise ValueError('Prepared edits require a regular file outside .git and without symbolic-link components')
     maximum = request.get("max_file_size", 10485760)
     if path.stat().st_size > maximum:
         raise ValueError("File exceeds configured size limit")
@@ -265,11 +294,13 @@ def read_lines(request):
             "sha256": sha(snapshot), "next_offset": next_offset,
             "truncated": truncated or total > next_offset}
     if request.get('for_edit'):
-        top = subprocess.run(['git', '-C', str(path.parent), 'rev-parse', '--show-toplevel'], capture_output=True)
-        if top.returncode:
-            return {'error': 'not_repository', 'message': 'Prepared apply_patch requires a Git worktree; use guarded patch_file for other files'}
+        # A workspace/edit root is a directory, not a repository. Files outside
+        # the current cwd can still be explicitly selected by their full path.
+        edit_root = Path.cwd()
+        if not path.is_relative_to(edit_root):
+            edit_root = path.parent
         result.update(_edit_data_base64=base64.b64encode(snapshot).decode('ascii'),
-                      _edit_path=str(path), _edit_repository=os.fsdecode(top.stdout).strip())
+                      _edit_path=str(path), _edit_repository=str(edit_root))
     return result
 
 

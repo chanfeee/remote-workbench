@@ -164,13 +164,15 @@ async def test_invalid_snapshot_fails_before_ssh_and_write_claim(project, prepar
     assert (source/"value.txt").read_text() == "original\n"
 
 
-async def test_regular_read_has_no_staging_or_git_requirement(project):
+async def test_regular_and_edit_reads_need_no_git_repository(project):
     _, server, source, _ = project
     await call(server, "a", "workspace_switch", host="a", cwd=str(source))
     ordinary = await call(server, "a", "workspace_tools", tool="read_file", arguments={"path":"value.txt"})
     assert "edit_id" not in ordinary and ordinary["content"] == "1\toriginal"
-    unavailable = await call(server, "a", "workspace_tools", tool="read_file", arguments={"path":"value.txt","for_edit":True})
-    assert unavailable["error"] == "not_repository" and "edit_id" not in unavailable
+    editable = await call(server, "a", "read_file", path="value.txt", for_edit=True)
+    assert editable["edit_id"] and not editable.get("error")
+    result = await call(server, "a", "apply_patch", edits=[{"edit_id":editable["edit_id"],"new":["updated"]}])
+    assert result["success"] and (source/"value.txt").read_text()=="updated\n"
 
 
 @pytest.mark.parametrize('before,expected', [

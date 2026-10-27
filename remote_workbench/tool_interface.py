@@ -16,7 +16,9 @@ TOOL_NAMES = frozenset({
 })
 
 CALL_SOURCE_INSTRUCTIONS = (
-    'Use workspace_switch(command=...,read_files=[paths],edit_files=[paths]) for binding, initial checks and selected reads in one call. '
+    'On the first binding, call workspace_switch(host=...,cwd=...) without command or file reads, then immediately show its operation_log link in a user-facing progress update before executing remote work. '
+    'Reuse an already supplied viewer link in progress updates before commands; do not defer it until the final reply or request extra metadata just to obtain it. '
+    'Once the viewer link has been shown, workspace_switch(command=...,read_files=[paths],edit_files=[paths]) can combine later bindings, initial checks and selected reads. '
     'exec_command uses command=shell_text or command=[program,args]. '
     'command={commands:[[program,args],...]} batches sequential checks in one SSH call. '
     'Read files with read_file(for_edit=true); apply_patch uses edits=[{edit_id,new:[source lines]}], optionally start_line/end_line. '

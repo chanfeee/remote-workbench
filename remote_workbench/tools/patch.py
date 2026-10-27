@@ -8,10 +8,11 @@ from remote_workbench.edit_spec import FileEdit, edits_patch, prepared_edits, va
 async def ssh_apply_patch(patch: str | list[str] | None = None, cwd: str = ".", host: str | None = None, check_only: bool = False,
                           edits: list[FileEdit] | None = None, expected_files: dict[str, str] | None = None,
                           expected_repository: str | None = None, prepared_contents: dict[str, str] | None = None) -> dict:
-    """Check/apply a context patch (*** Begin Patch) or unified Git patch. Worktree only.
+    """Check/apply a context patch (*** Begin Patch) or unified Git patch. Works in ordinary directories and Git worktrees.
 
-    Uses git apply with default path protections and no --reject/--index. Check
-    and apply are serialized against other calls to this tool, not external editors.
+    Snapshot edits use content guards and atomic writes without Git. Patch text
+    uses git apply without requiring a repository or touching its index. Check
+    and apply serialize managed writers, not external editors.
     Full submitted patch is available as the command record's stdin JSON.
     """
     if edits is not None:
