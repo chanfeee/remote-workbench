@@ -3,8 +3,12 @@ import importlib.util
 import json
 from pathlib import Path
 import subprocess
+import sys
 
 import pytest
+
+if sys.version_info < (3, 11):
+    pytest.skip('Local stable updater requires Python 3.11+', allow_module_level=True)
 
 spec = importlib.util.spec_from_file_location('update_local_stable',
     Path(__file__).resolve().parents[1] / 'scripts/update_local_stable.py')
