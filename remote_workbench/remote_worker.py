@@ -262,9 +262,26 @@ def read_lines(request):
     path = Path(request["path"]).expanduser()
     if request.get('for_edit'):
         path = path.absolute()
-        if (path.resolve() != path or not path.is_file()
-                or any(part.casefold() == '.git' for part in path.parts)):
-            raise ValueError('Prepared edits require a regular file outside .git and without symbolic-link components')
+        if any(part.casefold() == '.git' for part in path.parts):
+            return {'error': 'protected_git_path', 'path': str(path),
+                    'message': 'Git metadata inside .git cannot be selected for editing.'}
+        for component in [*reversed(path.parents), path]:
+            if component.is_symlink():
+                return {'error': 'edit_symlink_path', 'path': str(path),
+                        'symlink_component': str(component),
+                        'message': 'Edit snapshots do not follow symbolic links; select the actual file path explicitly.'}
+        if path.resolve() != path:
+            return {'error': 'edit_path_not_canonical', 'path': str(path),
+                    'resolved_path': str(path.resolve()),
+                    'message': 'Select the canonical file path before requesting an edit snapshot.'}
+        try:
+            info = path.stat()
+        except FileNotFoundError:
+            return {'error': 'file_not_found', 'path': str(path),
+                    'message': 'File does not exist. Edit snapshots require an existing file; create a new file with workspace_tools("apply_patch") Add File or workspace_tools("write_file").'}
+        if not stat.S_ISREG(info.st_mode):
+            return {'error': 'not_regular_file', 'path': str(path),
+                    'message': 'Edit snapshots require a regular file; the selected path is a directory or another file type.'}
     maximum = request.get("max_file_size", 10485760)
     if path.stat().st_size > maximum:
         raise ValueError("File exceeds configured size limit")

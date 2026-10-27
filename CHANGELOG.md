@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Distinguish missing edit files, directories, symbolic links, noncanonical paths and protected Git metadata. Missing-file errors explain how to create a file without requesting a snapshot first.
+- Show readable worker failures in the audit viewer's main output, including existing records, while retaining the original protocol output in raw details and output retrieval.
+- Keep long paths and operation headings within their containers by allowing text wrapping and flex-item shrinking; allow section labels to wrap in narrow layouts.
+
 ## 0.4.1 — workspace binding and deployment fixes
 
 - Bind ordinary build/run directories without probing Git. Snapshot-backed editing no longer needs a Git worktree or Git executable and retains per-operation diffs, conflict protection and atomic file writes.

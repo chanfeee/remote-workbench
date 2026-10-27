@@ -13,7 +13,7 @@ from remote_workbench.audit_web import HTML
     "follow_latest", "initially_empty", "final_tail", "late_stdout", "late_stderr",
     "manual_history", "raw_output", "new_output_source", "restored_checkbox", "retry",
     "manual_refresh", "pinned_stream", "retry_record", "viewer_valid", "viewer_foreign",
-    "viewer_missing", "default_live", "disable_default_live",
+    "viewer_missing", "default_live", "disable_default_live", "worker_error",
 ])
 def test_live_refresh_behaviour(case):
     node = shutil.which("node")

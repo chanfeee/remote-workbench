@@ -6,6 +6,8 @@
 
 直接调用 `read_file(path="example.py", for_edit=true)`。返回有界的编号预览、`sha256`、实际 `path` 和 `edit_id`。只缓存这个文件，不复制工程、不扫描其他代码，主入口不创建本地暂存文件。
 
+编辑快照要求文件已经存在。新文件使用 `workspace_tools(tool="apply_patch", arguments={patch: ...})` 的 Add File，或明确使用高级 `write_file` 接口创建。缺失文件返回 `file_not_found`；目录等非普通文件、符号链接路径和 `.git` 元数据分别返回独立错误，不自动创建文件或跟随链接。查看器普通输出展示可读的 worker 错误；原始协议字节仍保留在原始输出与 `read_output` 中。
+
 普通整文件修改直接传新内容的行数组：
 
 ```json

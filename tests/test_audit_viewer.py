@@ -181,6 +181,29 @@ def test_unfinished_or_oversized_output_does_not_claim_test_success(audit_http):
     assert "summary" not in value
 
 
+@pytest.mark.parametrize('worker_op', [None, 'read_lines'])
+def test_worker_failure_has_human_summary_but_preserves_raw_output(audit_http, worker_op):
+    import json
+
+    client, base = audit_http
+    record = audit.create(kind='command', status='finished', exit_code=0, worker_op=worker_op)
+    result = {'error': 'file_not_found', 'message': 'File does not exist; create it first.',
+              'path': '/remote/project/new.json'}
+    raw = '\x1eREMOTE_WORKBENCH_RESULT_' + 'a' * 32 + ':\x1f' + json.dumps(result) + '\n'
+    with audit.open_stream(record, 'stdout') as stream:
+        stream.write(raw.encode())
+    page = client.get(base + '/api/output', params={'id': record, 'stream': 'stdout'}).json()
+    assert page['content'] == raw
+    assert audit.read_output(record)['content'] == raw
+    if worker_op:
+        assert page['summary']['kind'] == 'worker_error'
+        assert page['summary']['state'] == 'failed'
+        assert '/remote/project/new.json' in page['summary']['detail']
+        assert 'REMOTE_WORKBENCH_RESULT_' not in page['summary']['detail']
+    else:
+        assert 'summary' not in page  # Do not interpret arbitrary program output as a worker response.
+
+
 def test_api_reports_bad_ids_missing_records_streams_and_routes(audit_http):
     client, base = audit_http
     missing = "a" * 32

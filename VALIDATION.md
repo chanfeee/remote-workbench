@@ -1,5 +1,11 @@
 # Validation status
 
+## Edit errors and viewer overflow (2026-10-27, unreleased)
+
+- Worker error and viewer-output changes passed the complete local regression: **695 passed in 187.76 seconds**. Coverage distinguishes missing edit files, non-regular paths, symlink components and protected Git metadata, and preserves raw worker output while showing readable errors in the viewer.
+- After the final CSS changes, the viewer HTTP and browser-script tests passed: **33 passed in 10.25 seconds**. Real-browser checks confirmed that long paths and titles wrap within their containers at narrow component widths and that the complete viewer no longer acquires horizontal overflow from its heading.
+- These are source changes only; the existing 0.4.1 fixed installation is unchanged. No release tag or new deployed version is created for this update.
+
 ## 0.4.1 deployment candidate (2026-10-27)
 
 - Complete regression in the normal local process environment: **685 passed in 183.58 seconds**. The restricted sandbox cannot run the worker/loopback acceptance tests reliably; its failures were not treated as product test results.

@@ -136,5 +136,6 @@ def test_prepared_edit_refuses_git_metadata_even_when_cwd_is_git_directory(tmp_p
     metadata.mkdir()
     (metadata/'config').write_text('protected\n')
     monkeypatch.chdir(metadata)
-    with pytest.raises(ValueError, match='outside .git'):
-        remote_worker.read_lines({'path':'config', 'offset':0, 'limit':160, 'budget':8192, 'for_edit':True})
+    result = remote_worker.read_lines({'path':'config', 'offset':0, 'limit':160, 'budget':8192, 'for_edit':True})
+    assert result['error'] == 'protected_git_path'
+    assert (metadata/'config').read_text() == 'protected\n'

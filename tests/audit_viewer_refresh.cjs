@@ -54,7 +54,7 @@ async function boot({running = false, empty = false, checked = false, output = '
     if (!elements.has(id)) elements.set(id, new Element(id));
     return elements.get(id);
   };
-  const state = {rows: [], records: new Map(), streams: new Map(), requests: [], failList: false, jsonCalls: 0};
+  const state = {rows: [], records: new Map(), streams: new Map(), summaries: new Map(), requests: [], failList: false, jsonCalls: 0};
   function add(id, text, status = 'finished') {
     const record = {id, tool: 'exec_command', status, exit_code: status === 'finished' ? 0 : null,
       created_at: state.records.size + 1, arguments: {command: 'command-' + id[0]},
@@ -99,6 +99,7 @@ async function boot({running = false, empty = false, checked = false, output = '
         const cursor = Number(q.get('cursor') || 0), next = Math.min(bytes.length, cursor + 16384);
         value = {content: bytes.subarray(cursor, next).toString(), next_cursor: next,
           total_bytes: bytes.length, truncated: next < bytes.length};
+        if (state.summaries.has(key)) value.summary = clone(state.summaries.get(key));
         if (state.afterOutput) {const hook = state.afterOutput; state.afterOutput = null; hook();}
       }
       return {ok: status === 200, status,
@@ -152,6 +153,16 @@ async function run(name) {
     f.state.streams.set(A + ':' + (name === 'late_stderr' ? 'stderr' : 'stdout'), 'late output\n');
     f.state.records.get(A).status = 'finished'; await f.tick();
     assert.equal(f.el('output').textContent, 'late output\n', 'empty placeholder must be replaced');
+  } else if (name === 'worker_error') {
+    const raw = '\x1eREMOTE_WORKBENCH_RESULT_' + A + ':\x1f{"error":"file_not_found"}\n';
+    f = await boot({output: raw});
+    f.state.summaries.set(A + ':stdout', {kind: 'worker_error', state: 'failed',
+      title: '远端操作失败', detail: 'File does not exist; create it first.'});
+    await f.enable(); await f.tick();
+    assert.equal(f.el('output').textContent, 'File does not exist; create it first.');
+    assert.doesNotMatch(f.el('output').textContent, /REMOTE_WORKBENCH_RESULT/);
+    f.el('raw-details').open = true; await f.el('raw-details').emit('toggle'); await flush();
+    assert.equal(f.el('raw-output').textContent, raw);
   } else if (name === 'raw_output') {
     f = await boot({running: true}); f.el('raw-details').open = true;
     await f.el('raw-details').emit('toggle'); await flush(); await f.enable();
