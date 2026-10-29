@@ -9,12 +9,12 @@ from remote_workbench.session_server import create_server
 from tests.test_session_server import call, project, router_at
 
 
-async def test_primary_edits_schema_has_no_raw_patch_language(tmp_path):
+async def test_primary_patch_schema_accepts_local_patch_and_optional_snapshots(tmp_path):
     server = create_server(router_at(tmp_path))
     tools = {tool.name:tool for tool in await server.list_tools()}
     assert len(tools) == 8
     schema = tools['apply_patch'].inputSchema
-    assert 'edits' in schema['required'] and 'patch' not in schema['properties']
+    assert {'edits', 'patch'} <= schema['properties'].keys()
     assert schema['additionalProperties'] is False
     assert 'PreparedEdit' in schema['$defs']
     assert 'old' not in schema['$defs']['PreparedEdit']['properties']
@@ -43,7 +43,7 @@ async def test_legacy_edits_gateway_check_apply_and_atomic_conflict(project):
 
 
 @pytest.mark.parametrize('arguments',[
-    {'patch':['*** Begin Patch','*** End Patch']},
+    {},
     {'edits':[{'path':'a','old':['old'],'new':['new']}]},
     {'edits':[{'path':'a','old':['old'],'new':['new'],'extra':'typo'}]},
     {'edits':[{'path':'a','old':['old'],'new':['new']}],'patch':'unwanted'},

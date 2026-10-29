@@ -17,6 +17,7 @@ import uuid
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.server.fastmcp.tools.base import Tool
+from mcp.types import ToolAnnotations
 
 from remote_workbench import audit, job_collector
 from remote_workbench.audit_web import handler_for_workspaces
@@ -28,10 +29,10 @@ from remote_workbench.workspace_registry import WorkspaceTarget
 from remote_workbench.workspace_snapshot import collect as collect_snapshot
 from remote_workbench import baseline
 from remote_workbench.auth_boundary import authentication_command, refusal
-from remote_workbench.call_arguments import validate_call_arguments
+from remote_workbench.call_arguments import selected_files, validate_call_arguments, validate_output_budget
 from remote_workbench.edit_spec import PreparedEdit
 from remote_workbench.command_spec import Command, normalize_arguments
-from remote_workbench.tool_interface import INSTRUCTIONS, TOOL_NAMES, present_result
+from remote_workbench.tool_interface import INSTRUCTIONS, READ_ONLY_TOOL_NAMES, TOOL_NAMES, present_result
 
 _LOCAL_TOOLS = {"audit_list", "audit_get", "read_output", "search_output"}
 _JOB_CONTROL_TOOLS = {"job_status", "stop_job", "job_wait"}
@@ -44,8 +45,15 @@ _SESSION_LOCAL_TOOLS = {"workspace_resume", "workspace_note"}
 _UNLOCKED_TOOLS = _LOCAL_TOOLS | _JOB_CONTROL_TOOLS | {
     "workspace_info", "workspace_history", "resolve_operation"
 } | _READ_ONLY_REMOTE_TOOLS | _SESSION_LOCAL_TOOLS
-_BUDGETS = {"exec_command": 2048, "read_file": 4096, "patch_file": 4096,
+_BUDGETS = {"exec_command": 16384, "read_file": 4096, "patch_file": 4096,
             "git_diff": 4096, "start_job": 8192}
+
+
+def _command_finished_for_reads(result):
+    """A confirmed nonzero exit still supplies useful files for fixing a failure."""
+    return (isinstance(result, dict) and result.get('execution_state') == 'finished'
+            and type(result.get('exit_code')) is int and not result.get('error')
+            and not result.get('timed_out') and result.get('executed') is not False)
 
 
 def _job_origin_record(target, job_id, *, origin_nonce, launch_cwd, remote_state_dir,
@@ -449,15 +457,30 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
             # into an apparent tool failure that invites a dangerous retry.
             print("Remote Workbench communication accounting unavailable", file=sys.stderr)
 
+    async def read_selection(snapshot, identity, selected, max_bytes, *, cwd=None, parent_id=None):
+        from remote_workbench.tools.files import read_selected
+        with audit.scoped_metadata(**snapshot.metadata(), client_session_id=identity.session_id):
+            token = audit.operation_id.set(parent_id) if parent_id else None
+            try:
+                return await read_selected(snapshot.workspace.executor, selected,
+                                           max_bytes=min(max_bytes, 65536), cwd=cwd)
+            except (OSError, ValueError) as exc:
+                # A completed command must not look retryable because its
+                # optional follow-up read failed. Preserve its original result.
+                return [{'requested_path': path, 'error': 'read_failed', 'message': str(exc)[:512]}
+                        for path, _ in selected]
+            finally:
+                if token is not None:
+                    audit.operation_id.reset(token)
+
     async def switch(state, identity, host: str, cwd: str, expected_revision: int | None = None,
                      command: Command | None = None, max_bytes: int = 4096,
                      timeout: int | None = None, compute_review: dict | None = None,
                      read_files: list[str] | None = None,
                      edit_files: list[str] | None = None):
-        selected = [(p, False) for p in (read_files or [])] + [(p, True) for p in (edit_files or [])]
-        if (len(selected) > 16 or len({p for p, _ in selected}) != len(selected)
-                or any(not p or '\x00' in p or p.startswith('~') for p, _ in selected)):
-            raise ValueError('Select at most 16 distinct file paths without NUL or ~')
+        selected = selected_files(read_files, edit_files)
+        if selected:
+            validate_output_budget(max_bytes)
         record = audit.create(kind="tool", tool="workspace_switch", status="running",
                               arguments={"host": host, "cwd": cwd, "expected_revision": expected_revision})
         token = audit.operation_id.set(record)
@@ -482,18 +505,11 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
                     result["initial_error"] = str(exc)
             if selected:
                 initial = result.get('initial', {})
-                if (result.get('initial_error') or initial.get('error') or initial.get('timed_out')
-                        or initial.get('executed') is False or initial.get('exit_code') not in (None, 0)):
+                if result.get('initial_error') or (command is not None and not _command_finished_for_reads(initial)):
                     result['files_skipped'] = 'initial_command_not_successful'
                 else:
-                    result['files'] = []
-                    for path, for_edit in selected:
-                        try:
-                            item = await executors['read_file'](updated, identity, path=path,
-                                offset=0, limit=160, max_bytes=max_bytes, for_edit=for_edit, local_copy=False)
-                        except Exception as exc:
-                            item = {'error': 'read_failed', 'message': str(exc)[:512]}
-                        result['files'].append(dict(item, requested_path=path))
+                    snapshot = router.snapshot(updated)
+                    result['files'] = await read_selection(snapshot, identity, selected, max_bytes, parent_id=record)
             return result
         except BaseException as exc:
             audit.update(record, status="failed", error=str(exc))
@@ -579,28 +595,35 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
         invoke.__annotations__ = {p.name: p.annotation for p in signature.parameters.values()}
         invoke.__annotations__["return"] = str
         handlers[name] = invoke
-        schemas[name] = Tool.from_function(invoke, structured_output=False)
+        annotations = (ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False)
+                       if name in READ_ONLY_TOOL_NAMES else None)
+        schemas[name] = Tool.from_function(invoke, structured_output=False, annotations=annotations)
         if name == 'read_file':
-            async def read_file(path: str, offset: int = 0, limit: int = 160,
+            async def read_file(path: str | list[str], offset: int = 0, limit: int = 160,
                                 max_bytes: int = 4096, for_edit: bool = False, ctx: Context = None) -> str:
                 return await handlers['read_file'](path=path, offset=offset, limit=limit,
                                                    max_bytes=max_bytes, for_edit=for_edit, local_copy=False, ctx=ctx)
-            read_file.__doc__ = 'Read numbered lines; for_edit=true returns an edit_id for guarded updates. No probe or metadata discovery is needed.'
-            server.tool(structured_output=False)(read_file)
+            read_file.__doc__ = 'Read one path or a list of up to 16 explicit paths in one call/SSH request. for_edit=true returns edit_ids for guarded updates. offset/limit/max_bytes apply per file; no project scan.'
+            server.tool(structured_output=False, annotations=annotations)(read_file)
         elif name == "apply_patch":
-            # The primary editing schema has no model-authored patch language.
-            # Keep the compatible raw form in schemas[] for the advanced gateway.
-            async def structured_apply_patch(edits: list[PreparedEdit], cwd: str = ".", check_only: bool = False,
+            # Use the same patch language as local editing. Existing explicit
+            # snapshots remain supported, without being a compulsory handshake.
+            async def structured_apply_patch(patch: str | list[str] | None = None,
+                                             edits: list[PreparedEdit] | None = None,
+                                             cwd: str = ".", check_only: bool = False,
                                              command: Command | None = None, timeout: int | None = None,
-                                             max_bytes: int = 4096, compute_review: dict | None = None,
+                                             max_bytes: int = 16384, compute_review: dict | None = None,
+                                             read_files: list[str] | None = None,
+                                             edit_files: list[str] | None = None,
                                              ctx: Context = None) -> str:
-                return await handlers["apply_patch"](edits=edits, cwd=cwd, check_only=check_only,
-                    command=command, timeout=timeout, max_bytes=max_bytes, compute_review=compute_review, ctx=ctx)
+                return await handlers["apply_patch"](patch=patch, edits=edits, cwd=cwd, check_only=check_only,
+                    command=command, timeout=timeout, max_bytes=max_bytes, compute_review=compute_review,
+                    read_files=read_files, edit_files=edit_files, ctx=ctx)
             structured_apply_patch.__name__ = "apply_patch"
             structured_apply_patch.__doc__ = (
-                "Read with for_edit=true, then edits=[{edit_id,new:[source lines]}] for the whole file; optional start_line/end_line select a range. No old text or patch markers. "
-                "command optionally runs explicit checks only after successful apply, under the same binding/write claim. Returns next edit_ids. "
-                "check_only previews; cannot combine with command. Raw patches/Add/Delete: workspace_tools('apply_patch').")
+                "Apply local-style context patches (Add/Delete supported) or unified diffs. Optional edits use guarded snapshots; pass patch or edits. "
+                "command runs shell/argv/batch checks after success. read_files/edit_files explicitly return files after edits/checks; edit_files includes fresh guarded IDs. "
+                "check_only cannot run command. Full patch/diff is recorded.")
             server.tool(structured_output=False)(structured_apply_patch)
             tool_metadata = server._tool_manager.get_tool("apply_patch")
             model = tool_metadata.fn_metadata.arg_model
@@ -608,7 +631,7 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
             model.model_rebuild(force=True)
             tool_metadata.parameters = model.model_json_schema()
         else:
-            server.tool(structured_output=False)(invoke)
+            server.tool(structured_output=False, annotations=annotations)(invoke)
 
     for name, function, description in (
         ("workspace_info", info, "Inspect this thread's persistent workspace and metadata identity. No remote execution."),
@@ -617,8 +640,8 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
         ("workspace_note", note, "Read or update this thread's small local recovery note (goal, constraints, decisions, next_step)."),
         ("resolve_operation", resolve_operation, "Recover the same background job by its idempotency_key after a lost response. This may make a read-only SSH status request to the saved origin, then reconnects local log collection; it never starts a second job."),
         ("workspace_snapshot", workspace_snapshot, "Inspect current remote Git state and measured response bytes. Project contents are not scanned unless scan_content=true; then the scan is bounded by max_files and max_content_bytes. No test history is compared."),
-        ("workspace_switch", switch, "Bind an explicit host and actual cwd without copying code. Jobs retain their original target when this chat switches directories."),
-        ("workspace_use_local", use_local, "Clear this thread's active remote binding and return to native local tools. Remote targets, private copies, history, and job origins remain available."),
+        ("workspace_switch", switch, "Bind or switch an explicit host and actual cwd without copying code. Optional command/read_files/edit_files combine work; exec_command can also bind directly. Jobs keep their original target."),
+        ("workspace_use_local", use_local, "Clear this chat's remote binding and use native local tools. Saved targets, records and job origins remain available."),
     ):
         signature = inspect.signature(function, eval_str=True)
         signature = signature.replace(parameters=[p for p in signature.parameters.values()
@@ -626,24 +649,39 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
         register(name, signature, description, function)
 
     for name, function, description in TOOLS:
+        if name == 'exec_command':
+            description = ('Run shell text, argv or {commands:[argv,...]} in the selected directory. '
+                'Optional host + absolute cwd binds and runs together; repeat the same target without rebinding. '
+                'read_files/edit_files return selected files after confirmed completion, including nonzero exits; edit_files includes guarded edit_ids. '
+                'Paths use the command cwd; max_bytes applies to command/per file. stdin is exact text. '
+                'Fresh account shell; activate environments per call.')
         signature = inspect.signature(function, eval_str=True)
         public = signature.replace(parameters=[
             p.replace(default=".") if p.name == "cwd" else p.replace(default=_BUDGETS[name])
             if p.name == "max_bytes" and name in _BUDGETS else p
-            for p in signature.parameters.values() if p.name != "host"])
+            for p in signature.parameters.values() if p.name != "host" or name == 'exec_command'])
         if name == 'apply_patch':
             public = public.replace(parameters=[*public.parameters.values(),
                 inspect.Parameter('command', inspect.Parameter.POSITIONAL_OR_KEYWORD, default=None, annotation=Command | None),
                 inspect.Parameter('timeout', inspect.Parameter.POSITIONAL_OR_KEYWORD, default=None, annotation=int | None),
-                inspect.Parameter('max_bytes', inspect.Parameter.POSITIONAL_OR_KEYWORD, default=4096, annotation=int),
+                inspect.Parameter('max_bytes', inspect.Parameter.POSITIONAL_OR_KEYWORD, default=16384, annotation=int),
                 inspect.Parameter('compute_review', inspect.Parameter.POSITIONAL_OR_KEYWORD, default=None, annotation=dict | None)])
+        if name in {'exec_command', 'apply_patch'}:
+            public = public.replace(parameters=[*public.parameters.values(),
+                inspect.Parameter('read_files', inspect.Parameter.POSITIONAL_OR_KEYWORD, default=None, annotation=list[str] | None),
+                inspect.Parameter('edit_files', inspect.Parameter.POSITIONAL_OR_KEYWORD, default=None, annotation=list[str] | None)])
 
         async def execute(state, identity, _name=name, _function=function, **arguments):
             after = None
+            selected = (selected_files(arguments.pop('read_files', None), arguments.pop('edit_files', None))
+                        if _name in {'exec_command', 'apply_patch'} else [])
+            selection_budget = arguments.get('max_bytes', 16384)
+            if selected:
+                validate_output_budget(selection_budget)
             if _name == 'apply_patch':
                 after_command = arguments.pop('command', None)
                 options = {k: arguments.pop(k, default) for k, default in
-                           [('timeout', None), ('max_bytes', 4096), ('compute_review', None)]}
+                           [('timeout', None), ('max_bytes', 16384), ('compute_review', None)]}
                 if after_command is not None:
                     if arguments.get('check_only'):
                         raise ValueError('check_only cannot run command')
@@ -652,6 +690,37 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
             validate_call_arguments(_name, arguments)
             if _name in _LOCAL_TOOLS:
                 return await _function(**arguments)
+            requested_host = arguments.pop('host', None) if _name == 'exec_command' else None
+            if requested_host is not None:
+                # An explicit target may be selected in the same operation.
+                # New chats without one still fail closed in router.snapshot.
+                selected_cwd = arguments.get('cwd')
+                if not requested_host or not isinstance(selected_cwd, str) or not selected_cwd.startswith('/'):
+                    raise ValueError('An inline host requires an explicit absolute cwd')
+                config = router.config.get_host(requested_host)
+                if authentication_command(arguments.get('command', '')):
+                    refused = audit.create(kind='tool', tool='exec_command', status='failed',
+                        arguments={'command':'[authentication arguments omitted]'},
+                        host=requested_host, cwd=selected_cwd, error='authentication_requires_user_terminal')
+                    return dict(refusal(), operation_id=refused)
+                from remote_workbench.compute_review import check_compute_review
+                from remote_workbench.call_arguments import command_text
+                selected_commands = arguments['command']
+                review_commands = selected_commands['commands'] if isinstance(selected_commands, dict) else [selected_commands]
+                for item in review_commands:
+                    pending = check_compute_review(command_text(item), selected_cwd, config.ssh_target,
+                        arguments.get('compute_review'), config.compute_review_threshold)
+                    if pending:
+                        return pending
+                # Repeating an already-canonical target has the same semantics
+                # as omitting host. Keep the immutable target and revision;
+                # a different path/alias or explicit workspace_switch still
+                # performs directory validation. Command connection checks,
+                # supervision and write coordination remain in the normal path.
+                if (requested_host != state.host or selected_cwd != state.cwd
+                        or router.requires_directory_selection(state)):
+                    state = await router.switch(state, requested_host, selected_cwd)
+                arguments['cwd'] = '.'
             target = router.registry.get_job(state.workspace_id, arguments["job_id"]) if _name in _JOB_CONTROL_TOOLS else None
             if target is not None and target.host not in router.config.hosts:
                 return {"job_id": arguments["job_id"], "error": "job_origin_unavailable",
@@ -819,6 +888,9 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
                         if claim and _name == 'start_job':
                             router.resources.attach_job(claim, arguments['job_id'])
                         result = await tool(**arguments)
+                        if requested_host is not None:
+                            result['host'] = snapshot.host
+                            result['cwd'] = (result.get('remote_task') or {}).get('actual_cwd') or snapshot.cwd
                         if _name == 'apply_patch' and result.get('success') and not arguments.get('check_only'):
                             if arguments.get('prepared_contents') is not None:
                                 from remote_workbench.prepared_edit import applied_refs
@@ -908,6 +980,20 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
                     print("Remote Workbench job retry state unavailable", file=sys.stderr)
                 result = dict(result, idempotency_key=idempotency_key,
                               operation_state=operation_state, job_id=job_operation.job_id)
+            if selected:
+                observed = result.get('command_result', result) if _name == 'apply_patch' else result
+                if _name == 'apply_patch' and (not result.get('success') or result.get('error')
+                        or result.get('timed_out') or result.get('executed') is False
+                        or result.get('execution_state') not in (None, 'finished')):
+                    result['files_skipped'] = 'apply_not_successful'
+                elif (_name == 'exec_command' or after is not None) and not _command_finished_for_reads(observed):
+                    result['files_skipped'] = 'command_not_successful'
+                else:
+                    effective_cwd = ((observed.get('remote_task') or {}).get('actual_cwd')
+                                     or snapshot.workspace.resolve_cwd(arguments.get('cwd')))
+                    result['files'] = await read_selection(snapshot, identity, selected,
+                        selection_budget, cwd=effective_cwd,
+                        parent_id=result.get('operation_id') or result.get('output_id'))
             return result
 
         register(name, public, description, execute)

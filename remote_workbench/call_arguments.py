@@ -21,6 +21,27 @@ def command_text(command):
     return command
 
 
+def selected_files(read_files=None, edit_files=None):
+    """Validate an explicit bounded selection before any command is submitted."""
+    values = []
+    for paths, for_edit in ((read_files, False), (edit_files, True)):
+        if paths is None:
+            continue
+        if not isinstance(paths, list) or any(
+                not isinstance(path, str) or not path or '\x00' in path or path.startswith('~')
+                for path in paths):
+            raise ValueError('Select at most 16 distinct file paths without NUL or ~')
+        values.extend((path, for_edit) for path in paths)
+    if len(values) > 16 or len({path for path, _ in values}) != len(values):
+        raise ValueError('Select at most 16 distinct file paths without NUL or ~')
+    return values
+
+
+def validate_output_budget(budget):
+    if budget is not None and (type(budget) is not int or not 256 <= budget <= 1048576):
+        raise ValueError('max_bytes must be an integer between 256 and 1048576')
+
+
 def patch_text(patch):
     if isinstance(patch, list):
         if not patch or not all(isinstance(line, str) and '\n' not in line and '\r' not in line for line in patch):
@@ -45,12 +66,16 @@ def validate_call_arguments(name, arguments):
         return
     if name == 'exec_command':
         command_text(arguments.get('command'))
+        data = arguments.get('stdin')
+        if data is not None:
+            if not isinstance(data, str) or len(data.encode('utf-8')) > 1048576:
+                raise ValueError('stdin must be text of at most 1 MiB')
+            if isinstance(arguments.get('command'), dict):
+                raise ValueError('stdin requires shell text or argv; command batches have their own input')
         timeout = arguments.get('timeout')
         if timeout is not None and (type(timeout) is not int or timeout <= 0):
             raise ValueError('timeout must be a positive integer number of seconds or null')
-        budget = arguments.get('max_bytes')
-        if budget is not None and (type(budget) is not int or not 256 <= budget <= 1048576):
-            raise ValueError('max_bytes must be an integer between 256 and 1048576')
+        validate_output_budget(arguments.get('max_bytes'))
     else:
         if arguments.get('edits') is not None:
             if arguments.get('patch') is not None:

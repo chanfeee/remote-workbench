@@ -321,6 +321,32 @@ def read_lines(request):
     return result
 
 
+def read_selected(request):
+    """One bounded, explicit selection; never discover or scan a project."""
+    selection = request.get('files')
+    if (not isinstance(selection, list) or not 1 <= len(selection) <= 16
+            or any(not isinstance(item, dict) or not isinstance(item.get('path'), str)
+                   or not item['path'] or '\x00' in item['path']
+                   or type(item.get('for_edit')) is not bool for item in selection)):
+        raise ValueError('Select 1..16 explicit files')
+    results, used = [], 0
+    snapshot_budget = 4 * ((2 * request.get('max_file_size', 10485760) + 2) // 3)
+    for item in selection:
+        try:
+            if '.remote-workbench-sessions' in Path(os.path.abspath(item['path'])).parts:
+                raise ValueError('Select files from the actual directory, not a managed project copy')
+            value = read_lines(dict(request, path=item['path'], for_edit=item['for_edit']))
+            size = len(value.get('_edit_data_base64', ''))
+            if used + size > snapshot_budget:
+                value = {'error': 'snapshot_batch_budget', 'message': 'Read this file individually; selected snapshots exceed the batch budget'}
+            else:
+                used += size
+        except (OSError, ValueError, UnicodeError) as exc:
+            value = {'error': 'read_failed', 'message': str(exc)[:512]}
+        results.append(value)
+    return {'files': results}
+
+
 
 # The same supervisor owns foreground and detached workload lifecycles.
 if "supervise_task" not in globals():
@@ -476,6 +502,8 @@ def main():
             result = job(request)
         elif request["op"] == "apply_patch":
             result = apply_patch(request)
+        elif request["op"] == "read_selected":
+            result = read_selected(request)
         elif request["op"] == "read_lines":
             result = read_lines(request)
         elif request["op"] == "read_binary":

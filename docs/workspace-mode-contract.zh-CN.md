@@ -4,7 +4,7 @@
 
 ## 选择目录
 
-`remote-workbench-session` 的 `workspace_switch(host, cwd)`：
+`remote-workbench-session` 可用 `workspace_switch(host, cwd)` 绑定；本地候选也允许首个 `exec_command(host, cwd, command)` 在同一次调用中完成同样的显式绑定与执行。其目录规则一致：
 
 - 远端 `realpath` 规范化后直接使用该目录，不创建代码副本，不采集初始项目内容基线。只规范化目录并获取运行状态所需的 home，不探测 Git，也不扫描项目内容。
 - 不再接受 `directory_mode` 参数，不再提供 copy 模式或副本交付接口。

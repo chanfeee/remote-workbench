@@ -94,12 +94,13 @@ async def test_read_failure_is_per_file_and_binding_survives(project):
     assert value['files'][1]['content']=='1\toriginal'
 
 
-async def test_failed_initial_command_does_not_continue_reads(project):
+async def test_confirmed_nonzero_initial_command_keeps_requested_reads(project):
     _,server,source,_=project
     value=await call(server,'a','workspace_switch',host='a',cwd=str(source),
         command=[sys.executable,'-c','raise SystemExit(4)'],edit_files=['value.txt'])
     assert value['bound'] and value['initial']['exit_code']==4
-    assert value['files_skipped']=='initial_command_not_successful' and 'files' not in value
+    assert value['files'][0]['content']=='1\toriginal' and value['files'][0]['edit_id']
+    assert 'files_skipped' not in value
 
 
 @pytest.mark.parametrize('files',[['same','same'],['x']*17,['bad\x00path'],['~/guess']])
@@ -144,3 +145,56 @@ async def test_unknown_followup_does_not_claim_write_was_rolled_back(project,mon
     assert value['success'] and value['command_result']['execution_state']=='unknown'
     assert (source/'value.txt').read_text()=='changed\n'
     assert len(router.resources.active())==1
+
+
+async def test_three_operation_flow_returns_baseline_edits_tests_and_review_diff(project):
+    """Known paths: bind/link, inspect/read, edit/test/diff; no model involved."""
+    router,server,source,_=project
+    initial_code=['def scale(value):', '    return value * 2']
+    initial_tests=['import unittest', 'from scale import scale', '',
+        'class ScaleTests(unittest.TestCase):',
+        '    def test_default(self):', '        self.assertEqual(scale(3), 6)']
+    (source/'scale.py').write_text('\n'.join(initial_code)+'\n')
+    (source/'test_scale.py').write_text('\n'.join(initial_tests)+'\n')
+    (source/'REQUIREMENTS.md').write_text('Add optional offset while preserving default scale behavior.\n')
+    subprocess.run(['git','init','-q',str(source)],check=True)
+    # Track only this disposable fixture; a commit is not needed for review.
+    subprocess.run(['git','-C',str(source),'add','scale.py','test_scale.py','REQUIREMENTS.md'],check=True)
+    operations=[]
+    async def operate(name,**arguments):
+        operations.append(name)
+        return await call(server,'three-step',name,**arguments)
+
+    bound=await operate('workspace_switch',host='a',cwd=str(source))
+    # The user-facing link is available before any project command/read/edit.
+    assert bound['operation_log'] and 'initial' not in bound and 'files' not in bound
+    assert (source/'scale.py').read_text()=='\n'.join(initial_code)+'\n'
+
+    inspected=await operate('workspace_switch',host='a',cwd=str(source),
+        command={'commands':[[sys.executable,'--version'],['git','status','--short'],
+                             [sys.executable,'-m','unittest','-v']]},
+        read_files=['REQUIREMENTS.md'],edit_files=['scale.py','test_scale.py'],max_bytes=16384)
+    assert inspected['initial']['exit_code']==0
+    assert 'Ran 1 test' in inspected['initial']['stderr']
+    requirements,code,tests=inspected['files']
+    assert 'optional offset' in requirements['content'] and 'edit_id' not in requirements
+    assert code['edit_id']!=tests['edit_id']
+
+    changed_code=['def scale(value, offset=0):','    return value * 2 + offset']
+    changed_tests=initial_tests+['','    def test_offset(self):',
+                               '        self.assertEqual(scale(3, offset=4), 10)']
+    applied=await operate('apply_patch',edits=[{'edit_id':code['edit_id'],'new':changed_code},
+        {'edit_id':tests['edit_id'],'new':changed_tests}],
+        command={'commands':[[sys.executable,'-m','unittest','-v'],['git','diff','--check'],
+            ['git','diff','--','scale.py','test_scale.py'],['git','status','--short']]},
+        max_bytes=16384,timeout=30)
+    assert applied['success'] and applied['command_result']['exit_code']==0
+    assert 'Ran 2 tests' in applied['command_result']['stderr']
+    assert all(step['exit_code']==0 for step in applied['command_result']['steps'])
+    review=applied['command_result']['stdout']
+    assert 'diff --git a/scale.py' in review and 'diff --git a/test_scale.py' in review
+    assert '+def scale(value, offset=0):' in review and '+    def test_offset(self):' in review
+    assert {item['path'] for item in applied['edits']}=={str(source/'scale.py'),str(source/'test_scale.py')}
+    assert not {code['edit_id'],tests['edit_id']} & {item['edit_id'] for item in applied['edits']}
+    assert operations==['workspace_switch','workspace_switch','apply_patch']
+    assert router.resources.active()==[]

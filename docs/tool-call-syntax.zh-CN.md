@@ -1,67 +1,91 @@
-# 编辑快照与调用防错
+# 命令、补丁与自动操作记录
 
-2026-10-26 的完整任务对照没有复现 JavaScript／补丁格式语法错误，但仍发生旧上下文抄错和测试字符串过度转义。当前本地实现用显式文件快照减少这些输入；这不是所有模型生成错误已消除或额外 token 已低于 2% 的结论。
+本地开发候选优先沿用普通命令与本地同款补丁接口。命令、执行位置、输入输出和受管补丁由执行层记录；Agent 不需要为生成记录另开模型回合。以下接口能力尚不表示整体耗时或 token 已接近本地，实际客户端仍需单独验收。
 
-## 推荐流程
-
-直接调用 `read_file(path="example.py", for_edit=true)`。返回有界的编号预览、`sha256`、实际 `path` 和 `edit_id`。只缓存这个文件，不复制工程、不扫描其他代码，主入口不创建本地暂存文件。
-
-编辑快照要求文件已经存在。新文件使用 `workspace_tools(tool="apply_patch", arguments={patch: ...})` 的 Add File，或明确使用高级 `write_file` 接口创建。缺失文件返回 `file_not_found`；目录等非普通文件、符号链接路径和 `.git` 元数据分别返回独立错误，不自动创建文件或跟随链接。查看器普通输出展示可读的 worker 错误；原始协议字节仍保留在原始输出与 `read_output` 中。
-
-普通整文件修改直接传新内容的行数组：
+## 首次命令可以同时选择目标
 
 ```json
-{"edits":[{"edit_id":"READ_RETURNED_ID","new":["def summarize():","    return 2"]}]}
+{"host":"cluster-a","cwd":"/work/project","command":["python3","--version"]}
 ```
 
-小范围修改可以额外传 `start_line`、`end_line`，行号为原快照的 1-based、首尾包含。多个范围不能重叠，整文件替换不能与同一快照的范围混用。
+这是 `exec_command` 的参数。明确的 `host` 和绝对 `cwd` 在同一次调用内完成绑定与执行，不要求先调用 `workspace_switch`。以后省略 `host` 即使用当前聊天的绑定；相对 `cwd` 相对于该绑定解析。新聊天没有绑定且不提供目标时仍拒绝远程执行；连接失败不回退本地，不自动认证。
 
-这是 `apply_patch` 的参数。工具取得原快照、生成补丁，并在远端校验整份文件哈希；Agent 不必手抄旧内容、计算 hunk、拼接补丁标记或使用原生 `apply_patch` 暂存源码。行数组保留字面的反斜杠、引号和 Unicode；整文件替换沿用原文件的 LF/CRLF 与尾换行约定，空文件使用 LF 尾换行。工具不猜测 `\\n` 应不应该被解码，不修复业务代码。
+`workspace_switch` 仍可只绑定，也可组合明确的初始命令、`read_files` 和 `edit_files`。切换目标保持旧任务的原始位置与运行状态，聊天之间不自动共享绑定。`workspace_use_local` 返回本地模式。
 
-高级兼容入口 `workspace_tools(tool="read_file", arguments={path:"example.py", for_edit:true, local_copy:true})` 仍可显式取得私有系统临时目录中的 `local_path`。修改此本地文件后用 `edits=[{edit_id}]` 应用。暂存修改尚未改变远端；主入口的无暂存快照必须传 `new` 或范围。
-
-`check_only=true` 可显式预览；正常 apply 内部已经检查哈希和 Git 补丁，不必为了普通修改额外调用一次预检查。审阅变更后运行必要测试；没有新修改或具体疑点时不要重复已通过的完整测试或 CLI 子集。
-
-## 减少模型往返的组合入口
-
-显式绑定时可同时执行初始命令和读取明确列出的文件：
+命令可以是 shell 文本或字面 argv 数组。需要环境激活、管道或 here-document 时使用普通 shell 命令；需要多项顺序检查时可传 `command={commands:[[程序,参数],...]}`。环境不跨调用隐式保存。
 
 ```json
-{"host":"cluster-a","cwd":"/user/selected/repo","command":{"commands":[["git","status","--short"],["python3","-m","unittest","-v"]]},"read_files":["REQUIREMENTS.md"],"edit_files":["csvstats.py","test_csvstats.py"]}
+{"command":["python3","-c","import sys; print(sys.stdin.read())"],"stdin":"input text\n"}
 ```
 
-这是 `workspace_switch` 的参数。`files` 按只读列表、编辑列表顺序返回；编辑项带 `edit_id`。最多十六个不同的明确路径，预览每文件受 `max_bytes`（默认4096）和160行限制，不自动发现/扫描其他源码，不创建暂存副本。初始命令未成功时，返回已成功的绑定与初始执行事实，跳过文件读取；个别读取失败则在该文件项记录错误。
+文本 `stdin` 按 UTF-8 原样保存并传给命令，上限 1 MiB；命令批次的输入用于批次协议，不与 `stdin` 混用。认证及计算审核在绑定或执行前检查。普通命令默认返回至多 16 KiB 的预览，完整流保存在本地；只在确实需要剩余输出时用 `read_output` 分页。
 
-修改后可显式指定后续命令：
+## 重复传入同一目标
+
+`exec_command` 再次给出已绑定的相同 host 和规范化实际 cwd 时，复用当前 target/revision，不再为这次命令额外探测、重新绑定目录。省略 host 的调用继续沿用当前绑定。
+
+目标改变、尚未绑定或传入别名路径时仍重新核验。显式 `workspace_switch` 始终检查目录，可用于需要重新确认实际位置的情况。每条命令仍检查 SSH 连接并创建独立操作记录；绑定复用不保存 shell 激活状态，也不跳过目录协调、编辑冲突或计算审核。
+
+工具公共说明只保留跨工具边界，具体参数由各工具 schema 和说明提供；不需要读取整份目录后才能使用命令／补丁。实际模型仍可能选择额外发现或审阅，接口不保证固定请求数。
+
+## 命令结束后同时获取选定文件
 
 ```json
-{"edits":[{"edit_id":"READ_RETURNED_ID","new":["new source line"]}],"command":{"commands":[["python3","-m","unittest","-v"],["git","diff","--check"],["git","diff"]]},"timeout":30,"max_bytes":8192}
+{"host":"cluster-a","cwd":"/work/project","command":["python3","-m","unittest","-v"],"read_files":["REQUIREMENTS.md"],"edit_files":["module.py","test_module.py"]}
 ```
 
-这是 `apply_patch` 的参数。文件校验、补丁和后续命令沿用同一绑定与写入占用，避免中途切换目录或被其他受管写操作插入。命令必须由调用者明确传入；不识别“测试”后自动运行额外流程。`check_only` 不允许带命令，认证/计算审核守卫在修改前执行。补丁冲突或未成功时不执行命令。
+主 `exec_command` 可完成目标选择、正常命令和显式文件读取，随后直接用返回的 `edit_id` 修改并检查，无需另开一次文件读取请求。也可继续使用普通命令、独立 `read_file` 和原生 patch；没有新增工具或执行模式。
 
-补丁与命令是两个事实，**不是回滚事务**：`success=true` 表示修改已完成，命令事实在 `command_result`，非零、超时和 unknown 不会改写成修改未发生。后续命令无法确认时保留资源冲突；完整输出和父子关联保留在审计。取消请求也不能解释成修改已撤销。
+`read_files` 和 `edit_files` 合计最多16个不同路径，只读取明确选择的文件。路径相对于命令实际启动的 cwd，绝对路径也可使用；不追踪任意 shell 内部 `cd`，环境激活不跨调用保存。`max_bytes` 用于命令预览，各文件预览使用同一预算且沿用64KiB上限；文件快照保留现有大小限制与冲突保护。
 
-成功应用后返回 `edits=[{path,edit_id}]`，来自刚应用的已知字节，减少为小修改重新读取的回合。这不是命令之后重新扫描的磁盘状态；命令、格式化器或外部程序如果又修改了文件，下次用此引用会触发原有哈希冲突。旧快照仍保留，不复用旧 ID 覆盖原内容。
+已确认完成且有明确退出码的命令可以继续读取，包括测试失败或 `git diff --no-index` 等非零退出；原退出码与失败输出保持不变，不能据此推断检查通过。超时、取消、未知状态或拒绝执行时返回 `files_skipped`。文件读取错误单独进入 `files`，不应因此重新运行已完成的命令。读取是命令之后的独立只读观测，不是跨外部程序的文件事务。每份文件记录关联原操作、原 target 和实际目录。
 
-组合是可选参数，原有单独调用继续可用，没有新增工具模式或通用编排 API。更新需要重载 MCP；已运行的旧进程不会自动获得新参数。
+## 准确的工具标注
 
-## 冲突、隔离与记录
+八个工具保持不变。`read_file`、`read_output` 和 `fetch_image` 通过 MCP annotations 声明不修改远端源码、聊天绑定或任务；本地审计、快照和预览缓存照常保存。它们限定在已绑定账户／工作区或本地已保存输出，不能据此执行任意 shell。
 
-- 主 `apply_patch` schema 只接受快照引用，不接受 `path/old/new` 或原始 `patch`，避免常用路径退回手抄上下文。公开工具仍为同一套八个，没有 full/compact 模式。
-- 引用属于原聊天和 target。同一 MCP 重启后可继续使用仍存在的本地暂存文件；切换目标后必须切回或重新读取，不能拿旧引用写到新服务器。其他聊天不能读取或应用此引用。
-- 文件在读取后被外部修改，即使修改处不在编辑范围内，也返回明确冲突。引用的原始快照或本地暂存文件损坏、替换为符号链接等，均拒绝；本地错误在写占用和 SSH 提交之前处理。
-- 字节传输保留 CRLF、文件尾换行及反斜杠。远端先核对所有快照文件及生成的修改内容，再进行保留权限、所有权的原子单文件写入，不调用 Git。
-- 单文件写入是原子的；外部终端不受协作锁约束。多个文件不是跨进程事务：写入期间的外部修改或文件系统故障仍可能造成部分完成，需检查返回事实和操作记录，不能盲目重放。
-- 工作区与 `for_edit` 快照编辑均支持非 Git 目录，不要求 Git 可执行文件，也不初始化仓库。引用固定读取时的实际编辑根及原 target；明确指定的外部文件也可编辑，同一调用中的快照需共享一个编辑根。`patch_file`、`write_file` 同样保留逐次 diff。
-- 完整传输与补丁保留在私有本地操作记录中，base64 仅是内部文件传输，不出现在正常工具回复中；模型只收到有界预览和引用。
-- 暂存路径不是长期文档地址。系统清理临时文件后应重新读取；不会因此自动覆盖、迁移或删除远端文件。
+`exec_command`、`apply_patch`、绑定控制及混合 `workspace_tools` 网关没有被标成只读。特别是，网关的查询操作不意味着其中的写入／任务操作也能免审。标注不替代服务端认证、校验、目录协调或计算审核；调用方是否采用它及审批行为仍由客户端策略决定。[OpenAI 工具标注说明](https://developers.openai.com/plugins/build/mcp-server)
 
-## 兼容入口
+此优化不写入任何全局或项目审批策略，不自动开启 `approve`、不改沙箱或自动审批审核器。减少一次工具往返能减少一次潜在的审批／传递等待，但不是固定速度或2% token目标的保证。
 
-旧 `edits=[{path,old,new}]`、原始文本／行数组、Add/Delete 及 unified Git patch 保留在 `workspace_tools(tool="apply_patch", arguments={...})`，固定工作区入口也保持兼容。调用旧精确上下文形式时仍拒绝不唯一或不匹配的内容，不进行模糊替换。
+## 使用本地同款补丁
 
-更新后需重载客户端 schema；旧进程不会自动获得新接口。`workspace_info.runtime` 显式提供版本、包路径和 data-dir，可区分同名 stable/develop 安装，不增加默认探测轮次。
+```json
+{"patch":["*** Begin Patch","*** Update File: run.sh","@@","-echo before","+echo after","*** Add File: test_run.py","+import unittest","*** End Patch"],"command":["python3","-m","unittest","-v"]}
+```
+
+这是主 `apply_patch` 的参数。接受 context patch 文本或逐行数组，也接受 unified Git diff；新增文件直接使用 Add File，不必先为不存在的文件申请快照。上下文、路径、已有目标冲突和受管写协调仍检查，不模糊修补错误内容。
+
+`command` 是调用者明确给出的后续检查，只在修改成功后执行，沿用同一绑定与写占用。认证/计算审核在写入前完成。修改和检查分别记实：修改成功后检查非零或未知，不代表修改已撤销。输出未知时保留不确定性和资源冲突，不盲目重放。
+
+`apply_patch` 同样接受 `read_files`／`edit_files`，在修改及后续命令结束后返回 `files`。例如格式化器改写源码后，可直接取得新内容和新快照，省去另一次读取。需要后续编辑时使用 `files` 内的新 `edit_id`；补丁阶段 `edits` 中的引用产生于后续命令之前。补丁冲突、执行超时／未知或被拒绝时不继续读取；已确认结束的非零检查仍保留文件和失败事实。未传文件选择时不会自动读取任何文件。
+
+命令和后续检查的 `stdout/stderr` 保留本次预算内的原文，识别出的测试摘要只补充事实，不替换成功输出。只有截断、缺失或具体检查需要时才回读日志；普通测试完成无需为获取已产生的短报告另开一轮调用。
+
+文本补丁使用已安装的 Git 程序做校验和应用，不要求目录是 Git 仓库，也不会初始化仓库。无 Git 程序时可使用下述原有快照编辑；快照写入不依赖 Git。
+
+## 可选的完整文件快照保护
+
+`read_file(path="example.py", for_edit=true)` 返回编号预览、`sha256`、实际路径与 `edit_id`；只缓存明确选定的文件，不复制工程或扫描其它代码。多个文件可用 `path=["module.py","test_module.py"]` 一次读取，最多16个不同路径，每文件分别受 `offset/limit/max_bytes` 限制并独立返回错误和引用。快照合计预算为配置单文件上限的两倍，超出项明确报错，不自动重试。
+
+```json
+{"edits":[{"edit_id":"READ_RETURNED_ID","new":["def calculate():","    return 2"]}]}
+```
+
+`patch` 和 `edits` 二选一。快照整文件替换使用已知新内容，Agent 不需要抄旧内容或计算 hunk；也可用1-based、首尾包含的 `start_line/end_line` 做范围替换。正常编辑不强制使用引用或行号。
+
+引用绑定到原聊天、target和实际编辑根；外部更改即使在编辑范围外，也会触发整文件冲突。成功应用返回下一次 `edit_id`，已知内容的小修可直接复用；后续命令或格式化器再改文件时，旧引用仍会正确冲突。原始快照、权限和单文件原子写入检查保留，多文件不是跨进程回滚事务。
+
+高级 `workspace_tools(tool="read_file", arguments={path:"example.py",for_edit:true,local_copy:true})` 可显式获取本地暂存文件再用 `edits=[{edit_id}]` 提交。主入口不创建暂存工程；临时文件消失时重新读取，不自动覆盖或迁移远端数据。旧 `{path,old,new}` 调用仍在高级入口保留。
+
+## 用户能独立看到的记录
+
+- 记录从工具执行时自动写入本地，包含用户命令、host、实际初始 cwd、提供的 stdin、stdout/stderr、退出状态、超时/取消及任务标识。SSH/shell传输包装保留在详情中。
+- 每次受管编辑保存本次补丁、文件与 diff，HTML从本地数据自动刷新，关闭页面不影响执行。模型只获取本次有界结果和操作记录链接，不需要重新读取日志来替用户生成记录。
+- 显式 `git diff` 是当前工作树差异；普通 shell 任意写入不等于完整逐文件审计。需要记录代码修改时使用受管补丁；对其它 shell 写入明确获取适用的差异，不宣称监控了任意程序的全部文件写入。
+- 八个公开工具是一套接口，没有 full/compact 运行模式，也不强制固定三次调用。记录、token统计与工程任务规划相互独立；费用工具仅用于手动基准。
+
+本地开发源码的接口变化需安装并重载客户端后才生效，运行中的 stable 不会自动更新。`workspace_info.runtime` 可显式查看实际版本、包路径与data-dir，不增加默认探测回合。
 
 ## 客户端与内容边界
 
@@ -82,6 +106,10 @@ python -m remote_workbench.call_source docs/examples/edit-request.json
 ```
 
 生成器拒绝重复键、非有限数字和无效 UTF-8，统一明确参数别名；固定 JavaScript 从 JSON 数据生成，并只输出 MCP 文本块，不重复序列化响应封套。它不执行请求或自动重试，也没有接管 App 的自由 JavaScript 调用桥。主入口限制和字节一致性测试不等于客户端绝不会犯语法或内容错误。
+
+生成调用不依赖 `atob`、`TextEncoder` 等浏览器 API；外层执行环境未提供这些 API 时仍可使用。自由编写的脚本仍须遵守调用端提供的 API，MCP 无法捕获或修复尚未提交给它的源码错误。
+
+成功前台命令回复始终保留实际 `remote_task.actual_cwd`；启动目录与它相同时可省去重复的 `launch_cwd`，空 `origin_nonce` 也可省略。不同目录、非空身份、清理限制及未知／失败／超时详情继续保留；原始操作记录和显式 `audit_get` 不做这项缩减。
 
 ## 验证层次
 

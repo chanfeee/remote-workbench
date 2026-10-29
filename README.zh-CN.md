@@ -95,6 +95,8 @@ Session 路由依赖客户端提供 `_meta.threadId`；缺少可用的聊天身�
 
 工具回复提供有界输出和 **Remote Workbench 操作记录** 链接，供 Agent 在聊天中展示。完整命令输出和 diff 保留在本地记录中，需要时通过 `read_output` 分页读取。
 
+`main` 开发版支持 `exec_command(host=..., cwd=..., command=..., stdin=...)`，一次选择明确目标并执行。可选 `read_files`／`edit_files` 在确认命令结束后返回选定文件，包括非零退出，路径相对于命令的实际 cwd。`apply_patch(patch=...)` 接受本地同款补丁和新增文件，也可在同次调用中运行检查并返回选定文件；`edit_files` 提供检查后文件内容的冲突保护引用。未知、超时或被拒绝执行时不继续读取。命令、输入输出和受管 diff 自动记录。见[调用示例](docs/tool-call-syntax.zh-CN.md)；实际 App／SSH 的验收范围见[验证记录](VALIDATION.md)，接近本地的耗时／token 目标尚未验证。独立 stable 安装另行更新。
+
 可选 HTML 查看器只读，默认自动刷新。每个进程使用可用的本机回环端口和独立 URL 前缀，可与其他本地页面并存。MCP 重启后使用新回复中的链接；关闭页面不影响执行，也不会删除记录。
 
 受管编辑记录本次修改。Git diff 是显式获取的当前差异；操作记录不会追踪任意 shell 命令或外部终端造成的所有文件写入。

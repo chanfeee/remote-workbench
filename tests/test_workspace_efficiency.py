@@ -36,17 +36,21 @@ async def test_workspace_result_is_single_compact_payload_and_output_is_pageable
     workspace = Workspace("efficiency", "remote", str(root), executor)
     server = create_server(workspace)
 
-    # A typical long command output should be sent once, bounded to the
-    # workspace default, while the complete stream remains locally pageable.
+    # Ordinary output fits the native-like default without an extra fetch;
+    # the complete stream remains pageable and explicit small caps still work.
     blocks = await server.call_tool(
         "exec_command",
         {"command": "python3 -c 'print(\"x\" * 5000, end=\"\")'"},
     )
     command_result = decode_content(blocks)
     assert command_result["exit_code"] == 0
-    assert command_result["truncated"] is True
+    assert command_result["truncated"] is False
     assert command_result["output_id"]
-    assert "[truncated bytes]" in command_result["stdout"]
+    assert command_result["stdout"] == "x" * 5000
+    capped = decode_content(await server.call_tool(
+        "exec_command", {"command": "python3 -c 'print(\"x\" * 5000, end=\"\")'", "max_bytes": 2048}
+    ))
+    assert capped['truncated'] is True and '[truncated bytes]' in capped['stdout']
 
     # FastMCP's previous default emitted pretty JSON text and the same object
     # again as structuredContent. Compare that exact envelope with this one.

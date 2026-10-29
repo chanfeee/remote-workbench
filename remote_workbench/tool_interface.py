@@ -15,29 +15,24 @@ TOOL_NAMES = frozenset({
     "apply_patch", "read_output", "fetch_image",
 })
 
+# These operations leave source files, bindings and jobs unchanged. Local
+# output caches/audit bookkeeping do not grant permission to mutate the source.
+READ_ONLY_TOOL_NAMES = frozenset({"read_file", "read_output", "fetch_image"})
+
 CALL_SOURCE_INSTRUCTIONS = (
-    'On the first binding, call workspace_switch(host=...,cwd=...) without command or file reads, then immediately show its operation_log link in a user-facing progress update before executing remote work. '
-    'Reuse an already supplied viewer link in progress updates before commands; do not defer it until the final reply or request extra metadata just to obtain it. '
-    'Once the viewer link has been shown, workspace_switch(command=...,read_files=[paths],edit_files=[paths]) can combine later bindings, initial checks and selected reads. '
-    'exec_command uses command=shell_text or command=[program,args]. '
-    'command={commands:[[program,args],...]} batches sequential checks in one SSH call. '
-    'Read existing regular files with read_file(for_edit=true); apply_patch uses edits=[{edit_id,new:[source lines]}], optionally start_line/end_line. '
-    'Missing files have no edit snapshot: create them with workspace_tools("apply_patch") Add File or workspace_tools("write_file"). '
-    'Do not handwrite patch markers or use native staging edits in the normal workflow. '
-    'apply_patch(command=...) runs explicit checks after successful edits; returned edits contain next edit_ids, so no reread is needed for already-known content. '
-    'Print MCP text blocks once, not the serialized envelope or ALL_TOOLS catalog. '
+    'Use supplied schemas; print returned text once. '
+    'Full output/diffs stay local; read_output pages them. Advanced tools: workspace_tools.'
 )
 
+# Clients may repeat server instructions in every deferred tool description.
+# Keep shared boundaries here; parameter details belong to each tool's schema.
 INSTRUCTIONS = (
-    'Local control; remote execution only for a host/cwd assigned in this chat. New chats start local. '
-    'workspace_switch binds the actual directory; never choose a managed project copy for normal work. '
-    'cwd, code/environment paths and result paths may be independent; pass them explicitly. Native tools stay local. No extra probe, catalog or metadata gate. '
-    'Use a fresh account shell; activate environments per call. No remote Codex CLI. '
-    'On identity/SSH failure stop; never reauthenticate or run requested remote work locally. '
-    + CALL_SOURCE_INSTRUCTIONS +
-    'Jobs/advanced tools use workspace_tools; old jobs retain their origin. Full output/diffs stay local; read_output pages them. '
-    'Include the supplied **Remote Workbench 操作记录** link in replies. fetch_image returns chat references, never base64. '
-    'Before heavy/parallel compute, scheduler submission or runtime/spawn tests: show command, concurrency and environment, wait for explicit user confirmation, then pass compute_review. Not an OS sandbox.'
+    'New chats start local; explicit host/cwd selects the actual directory, never a project copy. '
+    'Native tools stay local; no remote Codex CLI. '
+    'Reuse manual SSH authentication; stop on identity/SSH failure, never reauthenticate or fall back locally. '
+    'Heavy/parallel compute, scheduler and runtime/spawn tests require prior user confirmation of command/concurrency/environment, then compute_review. '
+    'Show supplied **Remote Workbench 操作记录** link. Records cover commands, input/output and managed diffs, not arbitrary shell writes. '
+    + CALL_SOURCE_INSTRUCTIONS
 )
 
 _PROGRESS = re.compile(
@@ -117,9 +112,9 @@ def present_result(name, result, arguments=None):
         summary = _test_summary(value, (arguments or {}).get("command", ""))
         if summary is not None:
             value["test_summary"] = summary
-            if summary["status"] != "failed":
-                value.pop("stdout", None)
-                value.pop("stderr", None)
+            # Keep the caller-budgeted original preview alongside the summary.
+            # Hiding a small successful report forces another model turn just
+            # to recover the execution facts already available in this call.
     if isinstance(value.get('command_result'), dict):
         value['command_result'] = present_result('exec_command', value['command_result'], arguments)
     if name in {"workspace_switch", "workspace_use_local"}:
@@ -142,6 +137,13 @@ def present_result(name, result, arguments=None):
         origin_fields = {"node", "boot_id", "version", "pid", "start_token", "task_id", "task_dir",
                          "backend", "timeout_seconds", "workload_pid", "pgid", "state", "reason", "exit_code"}
         value["remote_task"] = {key: item for key, item in task.items() if key not in origin_fields}
+        # Keep one actual path when launch and execution locations agree.
+        # Different origins, non-null identities and cleanup limits still matter.
+        projected = value["remote_task"]
+        if projected.get("actual_cwd") and projected.get("launch_cwd") == projected["actual_cwd"]:
+            projected.pop("launch_cwd")
+        if "origin_nonce" in projected and projected["origin_nonce"] is None:
+            projected.pop("origin_nonce")
     for key in ("stdout", "stderr"):
         if value.get(key) == "":
             value.pop(key)

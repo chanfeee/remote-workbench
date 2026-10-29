@@ -22,7 +22,7 @@ _SAFE_JOB_ID = re.compile(r"^[a-zA-Z0-9_-]{1,80}$")
 @mcp.tool()
 async def ssh_run(command: Command, cwd: str | None = None, timeout: int | None = None,
                   host: str | None = None, max_bytes: int = 16384, trace: bool = False,
-                  compute_review: dict | None = None) -> dict:
+                  compute_review: dict | None = None, stdin: str | None = None) -> dict:
     """Execute using the remote default shell's interactive login configuration.
 
     Return head/tail previews bounded by a shared stdout+stderr byte budget.
@@ -32,7 +32,8 @@ async def ssh_run(command: Command, cwd: str | None = None, timeout: int | None 
     Substantial computation requires explicit user confirmation of command,
     concurrency and environment; record it in compute_review. No OS PID cap.
     """
-    validate_call_arguments("exec_command", {"command": command, "cwd": cwd, "timeout": timeout, "max_bytes": max_bytes})
+    validate_call_arguments("exec_command", {"command": command, "cwd": cwd, "timeout": timeout,
+                                           "max_bytes": max_bytes, "stdin": stdin})
     display = command_text(command)
     config = get_executor(host).config
     checked_commands = command['commands'] if isinstance(command, dict) else [command]
@@ -42,15 +43,18 @@ async def ssh_run(command: Command, cwd: str | None = None, timeout: int | None 
         if pending:
             return pending
     executor = await require_connection(host)
+    input_options = {} if stdin is None else {'input_data':stdin.encode('utf-8')}
     if isinstance(command, dict):
         result = await executor.run('argv batch', cwd=cwd, timeout=timeout, output_budget=max_bytes,
                                     trace=trace, display_command=display, batch=True,
                                     input_data=json.dumps(command, ensure_ascii=False).encode('utf-8'))
     elif isinstance(command, list):
         result = await executor.run(program_command(command), cwd=cwd, timeout=timeout,
-                                    output_budget=max_bytes, trace=trace, display_command=display)
+                                    output_budget=max_bytes, trace=trace, display_command=display,
+                                    **input_options)
     else:
-        result = await executor.run(command, cwd=cwd, timeout=timeout, output_budget=max_bytes, trace=trace)
+        result = await executor.run(command, cwd=cwd, timeout=timeout, output_budget=max_bytes, trace=trace,
+                                    **input_options)
     value = {"stdout": result.stdout, "stderr": result.stderr, "exit_code": result.exit_code,
             "timed_out": result.timed_out, "truncated": result.truncated,
             "output_id": result.output_id, "execution_state": result.execution_state,

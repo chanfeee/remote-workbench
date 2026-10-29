@@ -16,7 +16,7 @@ def result(**updates):
                  "execution_state": "finished", "output_id": "a" * 32}, **updates)
 
 
-def test_only_plain_complete_success_is_summarized():
+def test_only_plain_complete_report_is_summarized_without_hiding_output():
     source = result()
     value = present_result("exec_command", source, {"command": "python3 -m unittest -v"})
     assert value["test_summary"] == {
@@ -24,7 +24,7 @@ def test_only_plain_complete_success_is_summarized():
         "executed": 1, "passed": 1, "report_status": "success", "process_status": "success",
         "total": 1, "skipped": 0,
     }
-    assert "stderr" not in value and value["exit_code"] == 0
+    assert value["stderr"] == source["stderr"] and value["exit_code"] == 0
     assert source["stderr"]  # projection does not mutate audit/source data
     failed_but_recognized = present_result(
         "exec_command", dict(source, exit_code=1), {"command": "python3 -m unittest -v"}
@@ -59,6 +59,7 @@ def test_large_success_uses_full_spool_but_keeps_unknown_output(tmp_path):
         value = present_result("exec_command", original, {"command": "python3 -m unittest -v"})
         assert value["test_summary"]["tests"] == 100
         assert value["truncated"] is True
+        assert value["stderr"] == "head/tail preview"
         assert (path / "stderr").read_text() == text
         (path / "stderr").write_text("ResourceWarning: do not hide this\n" + text)
         assert "test_summary" not in present_result("exec_command", original, {"command": "python3 -m unittest -v"})
@@ -91,7 +92,7 @@ def test_skipped_unittest_counts_are_explicit_and_all_skipped_is_not_passed():
         "executed": None, "passed": None, "report_status": "success", "process_status": "success",
         "total": 1, "skipped": 1,
     }
-    assert "stderr" not in value
+    assert value["stderr"] == skipped["stderr"]
     assert skipped["stderr"].startswith("test_skipped")
 
     partial = result(stderr=("test_one (tests.Example) ... ok\n"
@@ -104,6 +105,7 @@ def test_skipped_unittest_counts_are_explicit_and_all_skipped_is_not_passed():
         "executed": None, "passed": None, "report_status": "success", "process_status": "success",
         "total": 2, "skipped": 1,
     }
+    assert value["stderr"] == partial["stderr"]
 
 
 def test_nonverbose_skips_expected_failures_unknown_counters_and_failures():
@@ -204,7 +206,9 @@ async def test_single_catalog_keeps_advanced_tools_available_on_demand(tmp_path)
     assert {t.name for t in tools} == TOOL_NAMES | {"workspace_tools"}
     assert all(t.outputSchema is None for t in tools)
     encode = lambda tools: json.dumps([t.model_dump(exclude_none=True) for t in tools]).encode()
-    assert len(encode(tools)) < 6000
+    # A byte ceiling is not a model-request or token-cost guarantee. Keep one
+    # advertised interface as command/patch capabilities grow.
+    assert len(tools) == len(TOOL_NAMES) + 1
     for old_name in ("full", "compact"):
         legacy = create_server(router, tool_profile=old_name)
         assert encode(await legacy.list_tools()) == encode(tools)

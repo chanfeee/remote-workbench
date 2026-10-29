@@ -90,7 +90,7 @@ class Workspace:
 # every model-facing schema. Original tool validation/audit code remains shared.
 TOOLS = [
     ("exec_command", commands.ssh_run, "Execute shell text or an argv array in the remote workspace. Prefer arrays for literal arguments (no shell interpolation); strings support pipes/activation. Fresh account login shell each call; max_bytes bounds output."),
-    ("read_file", files.ssh_read_file, "Read numbered UTF-8 lines. for_edit=true returns edit_id/local_path from one complete file snapshot for guarded edits. offset is zero-based; limit/max_bytes bound the preview."),
+    ("read_file", files.ssh_read_file, "Read numbered UTF-8 lines from one path or up to 16 explicit paths in one SSH request. for_edit=true returns per-file edit_ids. offset/limit/max_bytes bound each preview."),
     ("fetch_image", files.ssh_fetch_image, "Fetch a remote PNG/JPG/PDF/SVG to a private local cache. PDF page is 1-based. Show returned image_markdown in chat; paths and metadata only, no base64. PDF/SVG previews require the local images extra."),
     ("write_file", files.ssh_write_file, "Atomically write remote UTF-8 content. Optional expected_sha256 rejects stale edits."),
     ("patch_file", files.ssh_patch_file, "Apply unique old/new replacements, or sequential edits=[{old,new}], remotely. Optional expected_sha256 and check_only; returns this edit's diff."),
@@ -298,7 +298,7 @@ def create_server(workspace: Workspace, *, viewer_url: str | None = None, sessio
 
     for name, function, description in TOOLS:
         default_max_bytes = {
-            "exec_command": 2048,
+            "exec_command": 16384,
             "read_file": 4096,
             "patch_file": 4096,
             "git_diff": 4096,

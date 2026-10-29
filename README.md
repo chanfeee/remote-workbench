@@ -95,6 +95,8 @@ Chat isolation applies to bindings and records; direct mode allows chats to shar
 
 Tool replies include bounded output and a **Remote Workbench 操作记录** link for the agent to show in chat. Full command output and diffs remain in local records and can be read in pages with `read_output`.
 
+Development builds from `main` accept `exec_command(host=..., cwd=..., command=..., stdin=...)` to bind an explicit target and execute in one call. Optional `read_files`/`edit_files` return selected files after confirmed completion, including a nonzero exit, using the actual command cwd. `apply_patch(patch=...)` accepts local-style patches, including new files, and can run checks and return selected files in the same call; `edit_files` provides guarded references to the contents after those checks. Unknown, timed-out or refused execution skips these reads. Commands, input/output and managed diffs are recorded automatically. See [call examples](docs/tool-call-syntax.zh-CN.md) and [validation status](VALIDATION.md) for App/SSH acceptance scope; near-local time/token performance remains unproven. Stable installations are updated separately.
+
 The optional HTML viewer is read-only and refreshes automatically. Each process has an available loopback port and its own URL prefix, so it can coexist with other local pages. Use a fresh returned link after restarting MCP. Closing the page does not stop execution or remove records.
 
 Managed edits record their own changes. Git diff is an explicitly requested view of current differences; the record does not track every file written by arbitrary shell commands or external terminals.

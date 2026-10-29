@@ -142,10 +142,9 @@ def test_real_unittest_output_keeps_framework_counts_execution_unknowns_and_proc
             assert html_summary == summary
             assert audit.read_output(output_id, "stderr", max_bytes=65536)["content"] == output
 
-            if summary["state"] == "failed" or compact_summary is None:
-                assert compacted["stderr"] == output
-            else:
-                assert "stderr" not in compacted
+            # Summaries supplement the budgeted execution report. Even a
+            # successful report remains visible without a second log read.
+            assert compacted["stderr"] == output
             projections[case] = (output, summary)
 
         # A normal skip and a mixed subTest pass/skip have the same unittest
