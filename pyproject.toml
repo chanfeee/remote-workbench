@@ -44,7 +44,7 @@ artifacts = ["remote_workbench/scripts/*.sh"]
 
 [tool.hatch.build.targets.sdist]
 # Defense in depth: Git tracking or a broad docs include must not ship local reports.
-exclude = ["/docs/reports", "/.local", "/.codex"]
+exclude = ["/docs/reports", "/.local", "/.codex", "/devtools", "/tests/test_dev_timing.py"]
 include = [
     "/remote_workbench",
     "/tests",
