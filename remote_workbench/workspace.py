@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 import posixpath
 import re
+import sqlite3
 import sys
 import uuid
 from threading import Thread
@@ -148,13 +149,17 @@ def bind_tool(workspace: Workspace, name: str, function, description: str, *, wo
                     root = posixpath.commonpath([root, posixpath.dirname(posixpath.normpath(posixpath.join(declared, arguments['path'])))])
                 if name == 'apply_patch' and arguments.get('expected_files'):
                     root = posixpath.commonpath([root, *[posixpath.dirname(p) for p in arguments['expected_files']]])
-                claim = claims.acquire(active_workspace.executor.config.ssh_target, root, session.id, name)
-            result = await function(**arguments)
-            if claim:
-                claims.finish(claim, result, background=name == 'start_job', shell=name == 'exec_command')
-            elif claims is not None and name in {'job_status', 'job_wait', 'stop_job'}:
-                claims.reconcile(session.id, arguments['job_id'], result)
-            return result
+                claim = claims.acquire(active_workspace.executor.config.ssh_target, root, session.id, name, tracked=True)
+            with claims.operation(claim) if claims is not None else nullcontext():
+                result = await function(**arguments)
+                if claim:
+                    try:
+                        claims.finish(claim, result, background=name == 'start_job', shell=name == 'exec_command')
+                    except (OSError, sqlite3.Error):
+                        result['resource_warning'] = 'completion_record_pending'
+                elif claims is not None and name in {'job_status', 'job_wait', 'stop_job'}:
+                    claims.reconcile(session.id, arguments['job_id'], result)
+                return result
         finally:
             workspace_executor.reset(token)
 

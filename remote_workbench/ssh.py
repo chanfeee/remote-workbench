@@ -269,6 +269,8 @@ class SSHExecutor:
         timed_out = False
         completion = None
         try:
+            from remote_workbench.resource_claims import mark_dispatch
+            mark_dispatch(record_id)
             proc = await asyncio.create_subprocess_exec(*ssh_args,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)

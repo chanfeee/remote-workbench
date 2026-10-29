@@ -97,6 +97,8 @@ async def ssh_run_background(command: str, cwd: str | None = None, job_id: str =
     executor = await require_connection(host)
     if timeout is not None and timeout <= 0:
         raise ValueError("timeout must be positive")
+    from remote_workbench.resource_claims import mark_job_submission
+    mark_job_submission()
     launched = await edit(
         executor, {"op": "job_start", "job_id": job_id, "command": command, "timeout": timeout},
         cwd=cwd or executor.config.default_cwd, max_bytes=max_bytes)

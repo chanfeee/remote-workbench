@@ -789,6 +789,7 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
                         launch_cwd=launch_cwd, remote_state_dir=remote_state_dir,
                         ssh_target=ssh_target)
             tool = bind_tool(snapshot.workspace, _name, _function, "")
+            claim_operation = None
             with audit.scoped_metadata(**snapshot.metadata(), client_session_id=identity.session_id):
                 try:
                     writes = _name in {"exec_command", "start_job", "write_file", "patch_file", "apply_patch"}
@@ -805,7 +806,7 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
                         try:
                             claim = router.resources.acquire(
                                 snapshot.workspace.executor.config.ssh_target, resource_root,
-                                state.workspace_id, _name)
+                                state.workspace_id, _name, tracked=True)
                         except ValueError:
                             # No remote submission occurred. A caller may retry
                             # the same key when the conflicting workload ends.
@@ -814,9 +815,9 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
                                     state.workspace_id, idempotency_key, "rejected")
                                 job_operation = None
                             raise
-                        if _name == "start_job":
-                            router.resources.attach_job(claim, arguments["job_id"])
-                    with job_collector.scoped_origin(job_origin):
+                    with router.resources.operation(claim) as claim_operation, job_collector.scoped_origin(job_origin):
+                        if claim and _name == 'start_job':
+                            router.resources.attach_job(claim, arguments['job_id'])
                         result = await tool(**arguments)
                         if _name == 'apply_patch' and result.get('success') and not arguments.get('check_only'):
                             if arguments.get('prepared_contents') is not None:
@@ -858,14 +859,20 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
                                     result['audit_warning'] = 'following_command_link_incomplete'
                         elif after is not None:
                             result['command_skipped'] = 'apply_not_successful'
-                    if claim:
-                        router.resources.finish(claim, result.get('command_result', result),
-                            background=_name == "start_job", shell=_name == "exec_command" or 'command_result' in result)
+                        if claim:
+                            try:
+                                router.resources.finish(claim, result.get('command_result', result),
+                                    background=_name == "start_job", shell=_name == "exec_command" or 'command_result' in result)
+                            except (OSError, sqlite3.Error):
+                                # The remote operation already returned; its marker
+                                # can reconcile locally once the state store recovers.
+                                result['resource_warning'] = 'completion_record_pending'
                 except BaseException:
                     if job_operation is not None:
                         try:
                             router.registry.update_job_operation(
-                                state.workspace_id, idempotency_key, "unknown")
+                                state.workspace_id, idempotency_key,
+                                "unknown" if claim_operation is not None and claim_operation.submitted else "rejected")
                         except (sqlite3.Error, OSError, ValueError):
                             print("Remote Workbench job retry state unavailable", file=sys.stderr)
                     raise
