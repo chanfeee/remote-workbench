@@ -19,7 +19,7 @@ async def test_first_command_binds_executes_and_records_stdin_without_setup_call
     result=await call(server,'a','exec_command',host='a',cwd=str(source),
         command=[sys.executable,'-c','import sys;sys.stdout.write(sys.stdin.read())'],stdin=data)
     assert result['exit_code']==0 and result['stdout']==data
-    assert result['host']=='a' and result['cwd']==str(source) and result['operation_log']
+    assert result['host']=='a' and result['cwd']==str(source) and 'operation_log' not in result
     state=router.registry.get_or_create('a')
     assert state.host=='a' and state.cwd==str(source)
     with audit.scoped_root(router.audit_dir(state.workspace_id)):

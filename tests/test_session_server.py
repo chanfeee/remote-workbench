@@ -470,7 +470,7 @@ async def test_threads_share_selected_directory_keep_records_and_guarded_edits(p
     assert a["cwd"] == b["cwd"] == str(source)
     assert a["workspace_id"] != b["workspace_id"]
     assert a["revision"] == b["revision"] == 1
-    assert f"/w/{a['workspace_id']}/)" in a["operation_log"]
+    assert 'operation_log' not in a and 'operation_log' not in b
     read = await call(server, "a", "read_file", path="value.txt")
     changed = await call(server, "a", "patch_file", path="value.txt", old="original", new="edited", expected_sha256=read["sha256"])
     assert not changed.get("error"), changed

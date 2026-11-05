@@ -31,7 +31,7 @@ INSTRUCTIONS = (
     'Native tools stay local; no remote Codex CLI. '
     'Reuse manual SSH authentication; stop on identity/SSH failure, never reauthenticate or fall back locally. '
     'Heavy/parallel compute, scheduler and runtime/spawn tests require prior user confirmation of command/concurrency/environment, then compute_review. '
-    'Show supplied **Remote Workbench 操作记录** link. Records cover commands, input/output and managed diffs, not arbitrary shell writes. '
+    'Read-only inline cards show saved operations. Records cover commands, input/output and managed diffs, not arbitrary shell writes. '
     + CALL_SOURCE_INSTRUCTIONS
 )
 

@@ -234,8 +234,7 @@ async def test_switch_can_inspect_actual_directory_and_preserves_binding_after_f
     opened = await call(compact, "a", "workspace_switch", host="a", cwd=str(source), command="cat value.txt")
     assert opened["initial"]["stdout"] == "original\n"
     assert opened["cwd"] == str(source)
-    assert "?id=" not in opened["operation_log"]
-    assert opened["operation_log"].endswith(f"/w/{router.registry.get_or_create('a').workspace_id}/)")
+    assert 'operation_log' not in opened
     other = await call(compact, "b", "workspace_switch", host="a", cwd=str(source), command="pwd")
     assert other["cwd"] == opened["cwd"]
     # Chats may explicitly share the same actual code directory.

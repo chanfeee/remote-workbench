@@ -109,7 +109,8 @@ async def test_shared_instructions_and_catalog_keep_required_boundaries(project)
     assert len(INSTRUCTIONS) <= 700
     for boundary in ('New chats start local', 'manual SSH', 'identity/SSH failure',
                      'user confirmation', 'compute_review', 'no remote Codex CLI',
-                     'Remote Workbench 操作记录'):
+                     'inline cards'):
         assert boundary in INSTRUCTIONS
+    assert 'Show supplied' not in INSTRUCTIONS and 'operation_log' not in INSTRUCTIONS
     assert 'activate environments per call' in tools['exec_command'].description
     assert 'Jobs keep their original target' in tools['workspace_switch'].description

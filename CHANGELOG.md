@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Show command facts and managed file changes in read-only MCP Apps cards, with grouped commands, bounded stdout/stderr, per-file counts and expandable colored diffs. Keep UI previews in result metadata and retain the eight-tool interface.
+- Stop standalone HTML viewers in MCP entrypoints and remove browser links and web/audit console commands. Preserve local records and add `remote-workbench records` for independent metadata and output-page queries; do not change installed stable versions.
+- Require the metadata-capable MCP SDK 1.30.0 already resolved in the lockfile. Keep manual SSH authentication, execution supervision, edit conflict protection and original-job recovery unchanged.
 - Recover directory write claims after pre-submission exceptions and acknowledged foreground completion/cancellation. Persist local submission evidence before SSH and background-submit boundaries; retain ambiguous submissions and unfinished jobs instead of guessing from local process exit.
 - Return explicitly selected files after confirmed command completion, including nonzero exits, so a failed check need not require another file-read call. Unknown, timed-out and refused execution still skips follow-up reads.
 - Support selected reads/edit snapshots after patch-followed checks, including formatter changes; retain per-file failures without replaying an applied patch or completed command.
@@ -14,7 +17,7 @@
 - Bind an explicit host/absolute cwd in the first command, accept text stdin, and expose local-style patches/Add File directly. Keep snapshot edits optional and automatically retain command/input/output/managed-diff records without extra model calls for bookkeeping.
 - Use a 16 KiB default command preview and preserve complete local output; remove the compulsory first-bind-only and snapshot-ID/line-range workflow. This is an interface candidate, not an end-to-end latency or token-parity claim.
 
-- Prefer combined inspection/read and edit/check/review calls for known-path tasks, after showing the first binding's record link. Reuse supplied schemas and edit references; retain additional calls for missing evidence, conflicts and failures instead of enforcing a request-count cap.
+- Prefer combined inspection/read and edit/check/review calls for known-path tasks, with recorded execution facts shown in the inline card. Reuse supplied schemas and edit references; retain additional calls for missing evidence, conflicts and failures instead of enforcing a request-count cap.
 - Read up to sixteen explicitly selected files in one MCP/SSH call, with separate bounded previews, edit snapshots, errors and audit records. Switch/check/read combinations also use one file-read request and retain the newly bound target's origin.
 - Launch the native workload shell without an extra Python exec process and wake the supervisor on completion instead of waiting for its control poll. Preserve login-shell startup, process-group ownership, cancellation, timeouts and output records.
 - Distinguish missing edit files, directories, symbolic links, noncanonical paths and protected Git metadata. Missing-file errors explain how to create a file without requesting a snapshot first.

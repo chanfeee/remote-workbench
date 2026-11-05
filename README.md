@@ -7,7 +7,7 @@ Remote Workbench gives a local agent command and file access to an explicitly se
 - Switch between local work and several remote servers, with independent bindings for each chat.
 - Read and edit files with conflict checks; inspect commands, output, and managed changes.
 - Start, query, stop, and recover background jobs using their original execution locations.
-- View local records in an optional HTML page and fetch remote images for display in chat.
+- View operations in read-only App cards, query saved records from the CLI, and fetch remote images for display in chat.
 
 ## Quickstart
 
@@ -93,13 +93,27 @@ Chat isolation applies to bindings and records; direct mode allows chats to shar
 
 ## Commands, records, and images
 
-Tool replies include bounded output and a **Remote Workbench 操作记录** link for the agent to show in chat. Full command output and diffs remain in local records and can be read in pages with `read_output`.
+Tool replies include bounded output and stable operation/output IDs. Full command output and diffs remain in local records and can be read in pages with `read_output`.
 
 Development builds from `main` accept `exec_command(host=..., cwd=..., command=..., stdin=...)` to bind an explicit target and execute in one call. Optional `read_files`/`edit_files` return selected files after confirmed completion, including a nonzero exit, using the actual command cwd. `apply_patch(patch=...)` accepts local-style patches, including new files, and can run checks and return selected files in the same call; `edit_files` provides guarded references to the contents after those checks. Unknown, timed-out or refused execution skips these reads. Commands, input/output and managed diffs are recorded automatically. See [call examples](docs/tool-call-syntax.zh-CN.md) and [validation status](VALIDATION.md) for App/SSH acceptance scope; near-local time/token performance remains unproven. Stable installations are updated separately.
 
-The optional HTML viewer is read-only and refreshes automatically. Each process has an available loopback port and its own URL prefix, so it can coexist with other local pages. Use a fresh returned link after restarting MCP. Closing the page does not stop execution or remove records.
+The unreleased MCP entrypoints no longer start a standalone HTML server, allocate a viewer port, or return browser links. Closing an inline card does not stop execution or remove records. Older stable installations keep their installed behavior until explicitly upgraded.
+
+**Unreleased inline prototype:** `exec_command` and `apply_patch` declare a read-only MCP Apps card for compatible clients. It shows the recorded server, actual cwd, command, process status, and bounded output or managed diff directly in chat. “Continue reading” uses the existing local `read_output` tool through the UI bridge; it does not run another command or ask the model to render the page. Card previews use result `_meta`, leaving model-visible result text unchanged and the catalog at eight tools. The component has no external assets or loopback fetches. Text-only clients retain ordinary tool results, saved records and CLI access. Stable installations and approval settings are updated separately.
+
+To inspect existing local records without the App, use the MCP state directory and workspace ID reported by `workspace_info`:
+
+```sh
+remote-workbench records --data-dir STATE_DIR --workspace-id WORKSPACE_ID
+remote-workbench records --data-dir STATE_DIR --workspace-id WORKSPACE_ID --id OPERATION_ID
+remote-workbench records --data-dir STATE_DIR --workspace-id WORKSPACE_ID --id OUTPUT_ID --stream stdout --cursor 0 --max-bytes 4096
+```
+
+This command reads existing local files only. It does not open SSH or start a web server.
 
 Managed edits record their own changes. Git diff is an explicitly requested view of current differences; the record does not track every file written by arbitrary shell commands or external terminals.
+
+The revised inline layout follows liteRemote's grouped activity and file review presentation: command/exit/time facts, per-file additions/deletions, and expandable colored diffs. A first candidate was loaded and exercised through the App with real SSH; the revised v2 layout still needs desktop rendering acceptance. No UI pagination acceptance or near-local token/time result is implied by local bridge tests.
 
 For images, ask the agent to show a remote PNG/JPG or a selected PDF page. `fetch_image` saves a local copy and returns a chat preview reference without putting base64 in MCP text. PDF/SVG previews need the optional local rendering packages:
 

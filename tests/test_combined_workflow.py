@@ -166,8 +166,8 @@ async def test_three_operation_flow_returns_baseline_edits_tests_and_review_diff
         return await call(server,'three-step',name,**arguments)
 
     bound=await operate('workspace_switch',host='a',cwd=str(source))
-    # The user-facing link is available before any project command/read/edit.
-    assert bound['operation_log'] and 'initial' not in bound and 'files' not in bound
+    # Binding does not need a browser page or execute any project command.
+    assert 'operation_log' not in bound and 'initial' not in bound and 'files' not in bound
     assert (source/'scale.py').read_text()=='\n'.join(initial_code)+'\n'
 
     inspected=await operate('workspace_switch',host='a',cwd=str(source),

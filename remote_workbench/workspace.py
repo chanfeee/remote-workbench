@@ -359,18 +359,12 @@ def _local_audit_viewer(port: int | None, *, audit_dir=None, handler=None):
 def main():
     parser = argparse.ArgumentParser(description="Local Remote Workbench MCP bound to one remote workspace")
     parser.add_argument("--workspace", required=True, help="Local workspace JSON manifest")
-    parser.add_argument("--viewer-port", type=int, default=0,
-                        help="Local viewer port (default 0: OS-assigned); if occupied, use an available port")
+    parser.add_argument('--viewer-port', type=int, default=None, help=argparse.SUPPRESS)
     args = parser.parse_args()
     workspace = Workspace.load(args.workspace)
     from remote_workbench.workspace_session import WorkspaceSession
     session = WorkspaceSession(workspace)
-    with _local_audit_viewer(args.viewer_port, audit_dir=session.audit_dir) as viewer:
-        viewer_url = None
-        if viewer is not None:
-            viewer_url = viewer.viewer_url + "/"
-            print(f"Local audit viewer: {viewer_url}", file=sys.stderr, flush=True)
-        create_server(workspace, viewer_url=viewer_url, session=session).run()
+    create_server(workspace, session=session).run()
 
 
 if __name__ == "__main__":

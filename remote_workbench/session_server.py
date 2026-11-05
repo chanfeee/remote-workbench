@@ -20,10 +20,9 @@ from mcp.server.fastmcp.tools.base import Tool
 from mcp.types import ToolAnnotations
 
 from remote_workbench import audit, job_collector
-from remote_workbench.audit_web import handler_for_workspaces
 from remote_workbench.config import load_config
 from remote_workbench.session_context import get_codex_identity, request_metadata, SessionIdentityUnavailable
-from remote_workbench.workspace import TOOLS, bind_tool, _local_audit_viewer
+from remote_workbench.workspace import TOOLS, bind_tool
 from remote_workbench.workspace_router import SessionRouter, default_state_dir
 from remote_workbench.workspace_registry import WorkspaceTarget
 from remote_workbench.workspace_snapshot import collect as collect_snapshot
@@ -106,8 +105,7 @@ def create_identity_probe(*, viewer_url: str | None = None, audit_dir: Path) -> 
     """A local diagnostic with no host configuration or remote execution tools."""
     server = FastMCP("remote-workbench-identity-probe", instructions=(
         "Read-only local MCP metadata diagnostic. session_identity_probe reports the conversation "
-        "identity supplied by the actual client. It does not connect to SSH or select a workspace. "
-        "Include the returned operation_log link in your user-facing result."
+        "identity supplied by the actual client. It does not connect to SSH or select a workspace."
     ))
 
     @server.tool(structured_output=False)
@@ -125,8 +123,6 @@ def create_identity_probe(*, viewer_url: str | None = None, audit_dir: Path) -> 
         with audit.scoped_root(audit_dir):
             record = audit.create(kind="tool", tool="session_identity_probe", status="finished", **result)
             result["operation_id"] = record
-            if viewer_url:
-                result["operation_log"] = f"[**Remote Workbench 操作记录**]({viewer_url}/?id={record})"
         return json.dumps(result, ensure_ascii=False, separators=(",", ":"))
 
     return server
@@ -180,25 +176,10 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
     handlers = {}
     schemas = {}
     executors = {}
-    linked_workspaces = set()
     server = SessionMCP("remote-workbench-session", instructions=INSTRUCTIONS)
-
-    def workspace_url(state):
-        return f"{viewer_url}/w/{state.workspace_id}/" if viewer_url else None
 
     def pack(result, state, name=None, arguments=None):
         result = present_result(name, dict(result), arguments)
-        url = workspace_url(state)
-        following = result.get('command_result', {})
-        needs_link = (state.workspace_id not in linked_workspaces
-                      or name in {"workspace_info", "workspace_switch", "workspace_use_local", "workspace_resume"}
-                      or result.get("error") or result.get("initial_error") or result.get("timed_out")
-                      or result.get("exit_code") not in (None, 0)
-                      or following.get('error') or following.get('timed_out')
-                      or following.get('exit_code') not in (None, 0))
-        if url and needs_link:
-            result["operation_log"] = f"[**Remote Workbench 操作记录**]({url})"
-            linked_workspaces.add(state.workspace_id)
         return json.dumps(result, ensure_ascii=False, separators=(",", ":"), default=str)
 
     async def info(state, identity, **arguments):
@@ -583,9 +564,7 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
                     state = router.registry.get(state.workspace_id)
                     return await run_scoped(state)
             except Exception as exc:
-                url = workspace_url(state)
-                link = f"\n\n[**Remote Workbench 操作记录**]({url})" if url else ""
-                text = str(exc) + link
+                text = str(exc)
                 record_metrics(state, name, arguments, text, started, failed=True)
                 raise ToolError(text) from exc
 
@@ -1022,6 +1001,8 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
         if unknown:
             raise ToolError("Unknown argument names: " + ", ".join(sorted(unknown)))
         return await schemas[tool].run(arguments, context=ctx)
+    from remote_workbench.inline_app import install as install_inline_app
+    install_inline_app(server, router)
     return server
 
 
@@ -1029,22 +1010,18 @@ def main():
     parser = argparse.ArgumentParser(description="Local, persistent Codex thread-aware remote workspace MCP (prototype)")
     parser.add_argument("--config", help="Host allowlist YAML; uses the normal Remote Workbench configuration by default")
     parser.add_argument("--data-dir", type=Path, default=default_state_dir(), help="Private local registry/audit directory")
-    parser.add_argument("--viewer-port", type=int, default=0, help="Local viewer port (default 0: OS-assigned); falls back if occupied")
+    # Old installed launchers may still pass this spelling. It opens no listener.
+    parser.add_argument("--viewer-port", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--identity-probe", action="store_true", help="Expose only a local metadata diagnostic, without host configuration or remote tools")
     parser.add_argument("--tool-profile", choices=("full", "compact"), default=None,
                         help=argparse.SUPPRESS)  # legacy spelling, no behavior switch
     args = parser.parse_args()
     if args.identity_probe:
         directory = args.data_dir.expanduser().resolve() / "identity-probe"
-        with _local_audit_viewer(args.viewer_port, audit_dir=directory) as viewer:
-            url = viewer.viewer_url
-            create_identity_probe(viewer_url=url, audit_dir=directory).run()
+        create_identity_probe(audit_dir=directory).run()
         return
     router = SessionRouter(load_config(args.config), args.data_dir)
-    with _local_audit_viewer(args.viewer_port, handler=handler_for_workspaces(router.state_dir / "audit")) as viewer:
-        url = viewer.viewer_url
-        print(f"Local session audit viewer: {url}", file=sys.stderr, flush=True)
-        create_server(router, viewer_url=url, tool_profile=args.tool_profile).run()
+    create_server(router, tool_profile=args.tool_profile).run()
 
 
 if __name__ == "__main__":
