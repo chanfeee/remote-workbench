@@ -14,6 +14,7 @@ async def test_submitted_patch_is_local_viewer_stream_without_model_echo(local, 
     result = await edit(executor, {"op": "apply_patch", "patch": patch, "check_only": check_only})
     assert result["success"]
     assert "diff" not in result
+    assert 'execution_state' not in result and 'timed_out' not in result
     directory = audit.directory(result["output_id"])
     assert (directory / "diff").read_text() == patch
     record = json.loads((directory / "record.json").read_text())

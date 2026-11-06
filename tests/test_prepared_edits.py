@@ -230,7 +230,7 @@ def test_partial_write_failure_reports_applied_and_pending_paths(tmp_path, monke
     assert (repo/'one.txt').read_text()=='after\n' and (repo/'two.txt').read_text()=='before\n'
 
 
-async def test_known_prepared_paths_extend_write_coordination(project, prepared_files):
+async def test_prepared_edits_ignore_legacy_directory_claims(project, prepared_files):
     router, server, source, _ = await bind(project)
     a,b=source/'a',source/'b';a.mkdir();b.mkdir();(b/'item.py').write_text('value=1\n')
     await call(server,'a','workspace_switch',host='a',cwd=str(a))
@@ -239,8 +239,8 @@ async def test_known_prepared_paths_extend_write_coordination(project, prepared_
     Path(ref['local_path']).write_text('value=2\n')
     ex=router.snapshot(router.registry.get_or_create('a')).workspace.executor
     held=router.resources.acquire(ex.config.ssh_target,str(b),other['workspace_id'],'exec_command')
-    with pytest.raises(ToolError,match='Managed directory busy'):
-        await call(server,'a','apply_patch',edits=[{'edit_id':ref['edit_id']}])
-    assert (b/'item.py').read_text()=='value=1\n'
+    result=await call(server,'a','apply_patch',edits=[{'edit_id':ref['edit_id']}])
+    assert result['success']
+    assert (b/'item.py').read_text()=='value=2\n'
     assert [c['claim_id'] for c in router.resources.active()]==[held]
     router.resources.finish(held,{'executed':False})

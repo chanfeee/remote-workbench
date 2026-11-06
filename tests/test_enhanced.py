@@ -301,7 +301,8 @@ async def test_relative_paths_follow_bound_workspace_and_state_isolated(local):
     assert not (path/'relative.txt').exists()
     value=await files.ssh_read_file('relative.txt')
     assert value['content']=='1\tcontent'
-    assert (state/'locks/writer.lock').is_file()
+    assert list((path/'.cache/remote-workbench-ssh/file-locks').glob('*.lock'))
+    assert not (state/'locks/writer.lock').exists()
     launch=await commands.ssh_run_background('exit 0')
     assert Path(launch['job_dir']).is_relative_to(state)
     for _ in range(30):

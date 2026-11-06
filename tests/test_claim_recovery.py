@@ -1,4 +1,4 @@
-"""Claim recovery uses submit/ack evidence; local owner death alone is insufficient."""
+"""Legacy claim inspection and submission recovery without directory blocking."""
 import asyncio
 import json
 from contextlib import contextmanager
@@ -286,25 +286,24 @@ with r.operation(c):
     assert list(peer.markers.iterdir()) == []
 
 
-async def test_attach_failure_rejects_job_and_allows_same_key_retry(project, monkeypatch):
+async def test_legacy_claim_store_failure_cannot_reject_a_job(project, monkeypatch):
     router, server, source, _ = project
     state = await call(server, 'a', 'workspace_switch', host='a', cwd=str(source))
     with monkeypatch.context() as patch:
         def unavailable(*args):
             raise sqlite3.OperationalError('injected job attachment failure')
-        patch.setattr(router.resources, 'attach_job', unavailable)
-        with pytest.raises(ToolError, match='job attachment failure'):
-            await call(server, 'a', 'start_job', command='printf once', idempotency_key='attach-retry')
+        for method in ('acquire', 'attach_job', 'finish'):
+            patch.setattr(router.resources, method, unavailable)
+        result = await call(server, 'a', 'start_job', command='printf once',
+                            idempotency_key='attach-retry', wait_seconds=2)
     assert router.resources.active() == []
     operation = router.registry.get_job_operation(state['workspace_id'], 'attach-retry')
-    assert operation.state == 'rejected'
-    result = await call(server, 'a', 'start_job', command='printf once',
-                        idempotency_key='attach-retry', wait_seconds=2)
+    assert operation.state == 'submitted'
     assert result['job_id'] == operation.job_id and result['operation_state'] == 'submitted'
     assert result.get('error') is None
 
 
-async def test_claim_bookkeeping_failure_preserves_success_and_allows_next_write(project, monkeypatch):
+async def test_legacy_claim_bookkeeping_is_not_used_by_new_writes(project, monkeypatch):
     router, server, source, _ = project
     await call(server, 'a', 'workspace_switch', host='a', cwd=str(source))
     with monkeypatch.context() as patch:
@@ -312,10 +311,9 @@ async def test_claim_bookkeeping_failure_preserves_success_and_allows_next_write
             raise sqlite3.OperationalError('injected completion accounting failure')
         patch.setattr(router.resources, 'finish', unavailable)
         result = await call(server, 'a', 'write_file', path='value.txt', content='written once\n')
-    assert result['success'] and result['resource_warning'] == 'completion_record_pending'
+    assert result['success'] and 'resource_warning' not in result
     assert (source / 'value.txt').read_text() == 'written once\n'
-    # A peer reaps only because the real transport record acknowledged the
-    # completed write; its metadata failure does not force a replay.
+    # New operations do not depend on legacy completion bookkeeping.
     next_write = await call(server, 'b', 'workspace_switch', host='a', cwd=str(source))
     assert next_write['cwd'] == str(source)
     result = await call(server, 'b', 'write_file', path='other.txt', content='independent\n')

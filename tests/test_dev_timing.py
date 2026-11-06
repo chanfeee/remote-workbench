@@ -213,15 +213,16 @@ async def test_instrumented_command_patch_and_read_keep_normal_supervision_and_r
             assert record['command'] == 'printf hello'
             assert record['actual_cwd'] == str(source) and record['remote_task']['cleanup_state'] != 'unconfirmed'
             assert (audit.directory(changed['output_id']) / 'diff').read_text().strip()
-        assert not router.resources.active()
+        assert router._resources is None
     recorder.close()
     events = events_at(recorder.directory)
     spans = [row for row in events if row['kind'] == 'span']
     assert len({row['trace'] for row in spans}) == 3
     layers = {row['layer'] for row in spans}
     assert {'ssh.control_check', 'ssh.prepare', 'ssh.transport', 'workspace.lease_acquire',
-            'workspace.lease_release', 'resource.acquire', 'resource.finish', 'operation.execute',
+            'workspace.lease_release', 'operation.execute',
             'reply.projection', 'registry.record_call'} <= layers
+    assert not {'resource.acquire', 'resource.finish'} & layers
     referenced = {row['audit_id'] for row in events if row['kind'] == 'reference'}
     assert {first['output_id'], changed['output_id'], changed['command_result']['output_id']} <= referenced
     assert all(value not in (recorder.directory / 'events.jsonl').read_text()

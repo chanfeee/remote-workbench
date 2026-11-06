@@ -50,6 +50,12 @@ async def test_direct_rejects_copy_path_and_symlink_alias(project):
 
 async def test_fixed_entry_default_keeps_code_shared_and_records_separate(local,monkeypatch):
     executor,tmp=local
+    # Keep the simulated SSH transport but use the real per-request routing;
+    # the low-level local fixture's file mock always returns its root executor.
+    from remote_workbench.server import require_connection, get_executor
+    monkeypatch.setattr('remote_workbench.tools.files.require_connection',require_connection)
+    monkeypatch.setattr('remote_workbench.tools.commands.require_connection',require_connection)
+    monkeypatch.setattr('remote_workbench.tools.commands.get_executor',get_executor)
     monkeypatch.setattr(SSHExecutor,'check_connection',AsyncMock(return_value=(True,'connected')))
     root=tmp/'existing project';root.mkdir();(root/'value.txt').write_text('original\n')
     template=Workspace('test','host',str(root),executor)
@@ -65,11 +71,10 @@ async def test_fixed_entry_default_keeps_code_shared_and_records_separate(local,
     value=json.loads((await servers[0].call_tool('exec_command',{'command':['pwd']}))[0].text)
     assert value['exit_code']==0 and value['stdout'].strip()==str(root)
     assert not list(tmp.rglob('.remote-workbench-sessions'))
-    claim=sessions[0].resources.acquire('local-simulated',str(root),sessions[0].id,'test')
-    with pytest.raises(ToolError,match='busy or completion unknown'):
-        await servers[1].call_tool('write_file',{'path':'value.txt','content':'blocked'})
-    assert (root/'value.txt').read_text()=='original\n'
-    sessions[0].resources.finish(claim,{'executed':False})
+    changed=json.loads((await servers[1].call_tool('write_file',{'path':'value.txt','content':'shared'}))[0].text)
+    assert changed['success'] and (root/'value.txt').read_text()=='shared'
+    observed=json.loads((await servers[0].call_tool('read_file',{'path':'value.txt'}))[0].text)
+    assert 'shared' in observed['content']
 
 
 

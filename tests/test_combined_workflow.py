@@ -111,26 +111,29 @@ async def test_invalid_read_selection_rejected_before_remote(tmp_path,files):
     assert not router._executors
 
 
-async def test_followup_keeps_original_binding_and_write_claim(project,monkeypatch):
+async def test_followup_keeps_binding_without_holding_file_or_directory(project,monkeypatch):
     import asyncio
     router,server,source,other,ref=await prepared(project)
     ex=router.snapshot(router.registry.get_or_create('a')).workspace.executor
     original=ex.run;entered=asyncio.Event();release=asyncio.Event()
     async def pause(*args,**kwargs):
         if kwargs.get('display_command')=='pwd':
-            assert len(router.resources.active())==1
+            assert router._resources is None
             entered.set();await release.wait()
         return await original(*args,**kwargs)
     monkeypatch.setattr(ex,'run',pause)
     running=asyncio.create_task(call(server,'a','apply_patch',edits=[{'edit_id':ref,'new':['changed']}],command=['pwd']))
     await asyncio.wait_for(entered.wait(),5)
+    await call(server,'b','workspace_switch',host='a',cwd=str(source))
+    assert (await call(server,'b','write_file',path='value.txt',content='changed again\n'))['success']
     switching=asyncio.create_task(call(server,'a','workspace_switch',host='b',cwd=str(other)))
     await asyncio.sleep(0)
     assert not switching.done()
     release.set()
     value=await asyncio.wait_for(running,5)
     assert value['command_result']['stdout'].strip()==str(source)
-    assert (await switching)['host']=='b' and router.resources.active()==[]
+    assert (await switching)['host']=='b' and router._resources is None
+    assert (source/'value.txt').read_text()=='changed again\n'
 
 
 async def test_unknown_followup_does_not_claim_write_was_rolled_back(project,monkeypatch):
@@ -144,7 +147,8 @@ async def test_unknown_followup_does_not_claim_write_was_rolled_back(project,mon
     value=await call(server,'a','apply_patch',edits=[{'edit_id':ref,'new':['changed']}],command=['pwd'])
     assert value['success'] and value['command_result']['execution_state']=='unknown'
     assert (source/'value.txt').read_text()=='changed\n'
-    assert len(router.resources.active())==1
+    assert router._resources is None
+    assert (await call(server,'a','write_file',path='other.txt',content='independent\n'))['success']
 
 
 async def test_three_operation_flow_returns_baseline_edits_tests_and_review_diff(project):

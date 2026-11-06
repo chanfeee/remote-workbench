@@ -1,7 +1,7 @@
-"""Local cooperative write claims for managed directories, never remote isolation.
+"""Submission tracking and inspection of legacy directory claims.
 
-Claims survive controller exit. Only an acknowledged terminal output releases an
-uncertain claim; a dead local PID alone is not evidence of remote completion.
+Current execution uses remote file locks, not directory claims. Keep the old
+claim store available for explicit inspection without blocking new operations.
 """
 import json
 from contextlib import contextmanager
@@ -25,10 +25,11 @@ class _Operation:
 
 
 def mark_dispatch(output_id):
-    """Persist intent before SSH submission; never wrap process-creation APIs."""
+    """Mark possible SSH submission; legacy scopes also persist their marker."""
     operation = _current_operation.get()
     if operation is not None and operation.active:
-        operation.resources._dispatch(operation.claim, output_id)
+        if operation.claim is not None:
+            operation.resources._dispatch(operation.claim, output_id)
         operation.submitted = True
 
 
@@ -36,12 +37,29 @@ def mark_job_submission():
     """A background submit API can lose its reply before exposing an output ID."""
     operation = _current_operation.get()
     if operation is not None and operation.active:
-        marker = operation.resources._marker(operation.claim)
-        if marker is None:
-            raise ValueError('Write claim tracking unavailable; no background job was submitted')
-        marker['submission_intent'] = True
-        operation.resources._write_marker(operation.claim, marker)
+        if operation.claim is not None:
+            marker = operation.resources._marker(operation.claim)
+            if marker is None:
+                raise ValueError('Write claim tracking unavailable; no background job was submitted')
+            marker['submission_intent'] = True
+            operation.resources._write_marker(operation.claim, marker)
         operation.submitted = True
+
+
+@contextmanager
+def submission():
+    """Track possible submission for idempotent recovery without taking a lock.
+
+    The registry persists job identity before this scope. An uncertain dispatch
+    must still become unknown rather than reopening its key for a second start.
+    """
+    operation = _Operation(None, None)
+    token = _current_operation.set(operation)
+    try:
+        yield operation
+    finally:
+        operation.active = False
+        _current_operation.reset(token)
 
 
 class ResourceClaims:

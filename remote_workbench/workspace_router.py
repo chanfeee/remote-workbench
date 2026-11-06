@@ -54,10 +54,17 @@ class SessionRouter:
         self.state_dir = Path(state_dir).expanduser().resolve()
         self.state_dir.mkdir(parents=True, mode=0o700, exist_ok=True)
         self.registry = Registry(self.state_dir / "workspaces.sqlite3")
-        self.resources = ResourceClaims(self.state_dir)
+        self._resources = None
         self.executor_factory = executor_factory
         self._executors = {}
         (self.state_dir / "locks").mkdir(mode=0o700, exist_ok=True)
+
+    @property
+    def resources(self):
+        """Explicit access to the legacy store; normal execution never uses it."""
+        if self._resources is None:
+            self._resources = ResourceClaims(self.state_dir)
+        return self._resources
 
     def audit_dir(self, workspace_id: str) -> Path:
         return self.state_dir / "audit" / workspace_id

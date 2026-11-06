@@ -11,8 +11,8 @@ async def ssh_apply_patch(patch: str | list[str] | None = None, cwd: str = ".", 
     """Check/apply a context patch (*** Begin Patch) or unified Git patch. Works in ordinary directories and Git worktrees.
 
     Snapshot edits use content guards and atomic writes without Git. Patch text
-    uses git apply without requiring a repository or touching its index. Check
-    and apply serialize managed writers, not external editors.
+    is relative to cwd, using git apply without requiring a repository or
+    touching its index. Only overlapping files serialize managed edits.
     Full submitted patch is available as the command record's stdin JSON.
     """
     if edits is not None:

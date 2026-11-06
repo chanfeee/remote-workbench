@@ -74,6 +74,40 @@ def validate_native_patch_syntax(text):
         raise ValueError("Patch needs at least one file operation")
 
 
+def patch_path(repo, name):
+    """Resolve one patch path without reading file contents or escaping cwd."""
+    if not name or any(ord(c) < 32 for c in name):
+        raise ValueError("Invalid patch path")
+    path = Path(name)
+    if not path.is_absolute():
+        path = Path(repo) / path
+    try:
+        relative = path.relative_to(repo)
+    except ValueError:
+        raise ValueError("Patch path is outside the selected directory: " + name)
+    if not relative.parts or any(p == ".." or p.casefold() == ".git" for p in relative.parts):
+        raise ValueError("Unsafe patch path: " + name)
+    if path.resolve() != path or path.is_symlink():
+        raise ValueError("Refusing a symbolic-link patch path: " + name)
+    return path, relative.as_posix()
+
+
+def native_patch_paths(text, repo):
+    """List all sources/destinations before compiling against locked contents."""
+    validate_native_patch_syntax(text)
+    paths = []
+    prefixes = ("*** Add File: ", "*** Update File: ", "*** Delete File: ", "*** Move to: ")
+    for line in text.splitlines():
+        for prefix in prefixes:
+            if line.startswith(prefix):
+                path, _ = patch_path(repo, line[len(prefix):])
+                if path in paths:
+                    raise ValueError("Patch path occurs more than once: " + str(path))
+                paths.append(path)
+                break
+    return paths
+
+
 def compile_native_patch(text, repo, max_file_size=10485760):
     validate_native_patch_syntax(text)
     lines = text.splitlines()
@@ -85,24 +119,11 @@ def compile_native_patch(text, repo, max_file_size=10485760):
     position = 1
 
     def path_for(name):
-        if not name or any(ord(c) < 32 for c in name):
-            raise ValueError("Invalid patch path")
-        path = Path(name)
-        if not path.is_absolute():
-            path = repo / path
-        try:
-            relative = path.relative_to(repo)
-        except ValueError:
-            raise ValueError("Patch path is outside the repository: " + name)
-        if not relative.parts or any(p == ".." or p.casefold() == ".git" for p in relative.parts):
-            raise ValueError("Unsafe patch path: " + name)
-        # A symlink in any path component could otherwise escape the worktree.
-        if path.resolve() != path or path.is_symlink():
-            raise ValueError("Refusing a symbolic-link patch path: " + name)
+        path, relative = patch_path(repo, name)
         if path in used:
             raise ValueError("Patch path occurs more than once: " + name)
         used.add(path)
-        return path, relative.as_posix()
+        return path, relative
 
     def read(path):
         info = path.stat()

@@ -12,7 +12,6 @@ import json
 from pathlib import Path
 import posixpath
 import re
-import sqlite3
 import sys
 import uuid
 from threading import Thread
@@ -135,31 +134,14 @@ def bind_tool(workspace: Workspace, name: str, function, description: str, *, wo
             arguments["cwd"] = active_workspace.resolve_cwd(arguments.get("cwd"))
         token = workspace_executor.set((active_workspace.host, active_workspace.executor))
         try:
-            claims = session.resources if session is not None else None
-            if claims is not None and name == 'apply_patch' and arguments.get('edits'):
+            if session is not None and name == 'apply_patch' and arguments.get('edits'):
                 from remote_workbench.edit_spec import prepared_edits
                 if prepared_edits(arguments['edits']):
                     from remote_workbench.prepared_edit import normalize
                     normalize(arguments, active_workspace.executor)
-            claim = None
-            if claims is not None and name in {'exec_command', 'start_job', 'write_file', 'patch_file', 'apply_patch'} and not arguments.get('check_only'):
-                declared = active_workspace.resolve_cwd(arguments.get('cwd'))
-                root = posixpath.commonpath([active_workspace.cwd, declared])
-                if isinstance(arguments.get('path'), str):
-                    root = posixpath.commonpath([root, posixpath.dirname(posixpath.normpath(posixpath.join(declared, arguments['path'])))])
-                if name == 'apply_patch' and arguments.get('expected_files'):
-                    root = posixpath.commonpath([root, *[posixpath.dirname(p) for p in arguments['expected_files']]])
-                claim = claims.acquire(active_workspace.executor.config.ssh_target, root, session.id, name, tracked=True)
-            with claims.operation(claim) if claims is not None else nullcontext():
-                result = await function(**arguments)
-                if claim:
-                    try:
-                        claims.finish(claim, result, background=name == 'start_job', shell=name == 'exec_command')
-                    except (OSError, sqlite3.Error):
-                        result['resource_warning'] = 'completion_record_pending'
-                elif claims is not None and name in {'job_status', 'job_wait', 'stop_job'}:
-                    claims.reconcile(session.id, arguments['job_id'], result)
-                return result
+            from remote_workbench.resource_claims import submission
+            with submission() if session is not None else nullcontext():
+                return await function(**arguments)
         finally:
             workspace_executor.reset(token)
 
