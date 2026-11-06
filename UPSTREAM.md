@@ -1,6 +1,6 @@
 # Upstream provenance
 
-The unreleased inline operation-card layout and colors also adapt the user-provided liteRemote activity/review UI, distributed with the same GNU AGPL version 3 license. This adaptation retains Remote Workbench's existing execution and audit interfaces; liteRemote's alternative execution backend is not incorporated.
+The inline operation cards reuse the user-provided liteRemote activity/review frontend styles and renderers, distributed with the same GNU AGPL version 3 license. Adaptations scope the two views, connect the existing result/read-only pagination bridge, adjust branding, and remove explanatory footers, visible history IDs, duplicate command descriptions and empty groups. Execution and audit interfaces remain Remote Workbench's own; liteRemote's alternative execution backend is not incorporated.
 
 Remote Workbench is an independently maintained derivative of [Onirika](https://github.com/xinyue-uoft/Onirika). Its source baseline is Onirika version 0.1.0 at upstream commit `1e297c353891eb9e1e9881ffa9db5cb08a877c55`.
 

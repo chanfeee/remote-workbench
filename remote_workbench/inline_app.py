@@ -10,7 +10,7 @@ from remote_workbench import audit
 from remote_workbench.presentation import parse_unified_diff, summarize_record
 from remote_workbench.session_context import get_codex_identity
 
-RESOURCE_URI = 'ui://remote-workbench/operation-v2.html'
+RESOURCE_URI = 'ui://remote-workbench/operation-v4.html'
 CARD_TOOLS = frozenset({'exec_command', 'apply_patch'})
 PREVIEW_BYTES = 4096
 
@@ -35,13 +35,16 @@ def _step(result, tool):
             streams[name] = audit.read_output(result['output_id'], name, max_bytes=PREVIEW_BYTES)
     diff = streams.get('diff')
     diff_summary = (parse_unified_diff(diff['content'], complete=not diff['truncated']) if diff else None)
+    remote_task = result.get('remote_task') or source.get('remote_task') or {}
     return dict(tool=tool, output_id=result.get('output_id'), operation_id=result.get('operation_id'),
                 host=view.get('host'), cwd=view.get('workspace_path'), command=view.get('command'),
                 state=result.get('execution_state') or view.get('state'),
                 exit_code=result.get('exit_code', source.get('exit_code')),
                 elapsed_ms=source.get('elapsed_ms', operation.get('elapsed_ms')),
                 check_only=bool(result.get('check_only')), changed=result.get('changed'),
-                timed_out=result.get('timed_out', False), error=result.get('error'),
+                executed=result.get('executed'),
+                timed_out=bool(result.get('timed_out') or source.get('timed_out') or source.get('status') == 'timeout'),
+                cleanup_state=remote_task.get('cleanup_state'), error=result.get('error'),
                 diff_summary=diff_summary, streams=streams)
 
 

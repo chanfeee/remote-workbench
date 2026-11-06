@@ -3,6 +3,7 @@ import json
 import shutil
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 from mcp import ClientSession, StdioServerParameters, types
@@ -11,7 +12,7 @@ from mcp.server.lowlevel.server import request_ctx
 from mcp.shared.context import RequestContext
 import pytest
 
-from remote_workbench import inline_app
+from remote_workbench import audit, inline_app
 from tests.test_session_server import call, project
 
 
@@ -68,6 +69,73 @@ async def test_process_failure_is_not_relabelled_as_success(project):
     assert step['exit_code'] == text['exit_code'] == 7
     assert step['streams']['stderr']['content'] == 'problem\n'
     assert step['state'] != 'success'
+
+
+@pytest.mark.parametrize('tool,state,timed_out,label', [
+    ('exec_command', 'remote_state_unknown', False, '状态未知'),
+    ('exec_command', 'remote_state_unknown', True, '已超时 · 状态未知'),
+    ('exec_command', 'cancellation_requested', False, '取消待确认'),
+    ('apply_patch', 'remote_state_unknown', False, '状态未知'),
+    ('apply_patch', 'remote_state_unknown', True, '已超时 · 状态未知'),
+])
+async def test_unconfirmed_zero_exit_survives_wire_and_renderer(project, monkeypatch, tmp_path, tool, state, timed_out, label):
+    router, server, source, _ = project
+    await call(server, 'a', 'workspace_switch', host='a', cwd=str(source))
+    executor = router.snapshot(router.registry.get_or_create('a')).workspace.executor
+    original = executor.run
+    dispatches = []
+
+    async def lose_completion(*args, **kwargs):
+        dispatches.append(args)
+        result = await original(*args, **kwargs)
+        task = dict(result.remote_task or {}, cleanup_state='unconfirmed')
+        audit.update(result.output_id, execution_state=state, remote_task=task,
+                     status='timeout' if timed_out else 'finished', timed_out=timed_out)
+        return replace(result, execution_state=state, remote_task=task, timed_out=timed_out)
+
+    monkeypatch.setattr(executor, 'run', lose_completion)
+    if tool == 'exec_command':
+        wire = await wire_call(server, 'a', tool, command=['printf', 'observed'], read_files=['value.txt'])
+    else:
+        wire = await wire_call(server, 'a', tool,
+            patch='*** Begin Patch\n*** Update File: value.txt\n@@\n-original\n+observed\n*** End Patch',
+            command=['printf', 'MUST_NOT_RUN'], read_files=['value.txt'])
+        assert (source / 'value.txt').read_text() == 'observed\n'
+    assert not wire.isError
+    result = json.loads(wire.content[0].text)
+    step = wire.meta['remote-workbench/operation']['steps'][0]
+    assert result['execution_state'] == step['state'] == state
+    assert step['exit_code'] == 0 and step['cleanup_state'] == 'unconfirmed'
+    assert step['timed_out'] is timed_out
+    assert 'files' not in result and 'command_result' not in result
+    assert result.get('files_skipped') and len(dispatches) == 1
+    with audit.scoped_root(router.audit_dir(router.registry.get_or_create('a').workspace_id)):
+        record = json.loads((audit.directory(result['output_id']) / 'record.json').read_text())
+        assert record['execution_state'] == state and record['exit_code'] == 0
+    node = shutil.which('node')
+    if node:
+        fixture = tmp_path / 'wire-card.json'
+        fixture.write_text(json.dumps({'meta': wire.meta, 'tool': tool, 'label': label, 'exit_code': 0}))
+        subprocess.run([node, str(Path(__file__).with_name('inline_app.cjs')), str(fixture)], check=True, timeout=20)
+
+
+async def test_review_refusal_is_rendered_as_not_executed_without_ssh(project, monkeypatch, tmp_path):
+    router, server, source, _ = project
+    await call(server, 'a', 'workspace_switch', host='a', cwd=str(source))
+    executor = router.snapshot(router.registry.get_or_create('a')).workspace.executor
+    async def forbidden(*args, **kwargs):
+        raise AssertionError('review refusal must not dispatch SSH')
+    monkeypatch.setattr(executor, 'run', forbidden)
+    wire = await wire_call(server, 'a', 'exec_command', command='make -j64 --help')
+    assert not wire.isError
+    result = json.loads(wire.content[0].text)
+    assert result['executed'] is False and result['error'] == 'compute_review_required'
+    assert wire.meta['remote-workbench/operation']['steps'][0]['executed'] is False
+    node = shutil.which('node')
+    if node:
+        fixture = tmp_path / 'refused-card.json'
+        fixture.write_text(json.dumps({'meta': wire.meta, 'tool': 'exec_command', 'label': '未执行', 'exit_code': None}))
+        subprocess.run([node, str(Path(__file__).with_name('inline_app.cjs')), str(fixture)], check=True, timeout=20)
 
 
 async def test_card_budget_and_decoration_failure_never_reexecute(project, monkeypatch):
