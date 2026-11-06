@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.4 — remove the host's inline minimum height
+
+- Set the desktop resource's `openai/widgetMinFrameHeight` to 0 and a compact initial height hint. Intrinsic content reporting alone in 0.4.3 could not override the host's default 200px minimum.
+- Return these values in actual MCP resource contents and advance the resource URI to v6. Keep the HTML, command execution and model-facing results unchanged.
+
 ## 0.4.3 — compact inline cards
 
 - Size inline cards from intrinsic content, observe content/viewport changes, and deduplicate height notifications. Collapsed command and diff views can shrink after expansion instead of retaining a large iframe viewport.

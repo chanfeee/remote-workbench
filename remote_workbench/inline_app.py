@@ -10,7 +10,7 @@ from remote_workbench import audit
 from remote_workbench.presentation import parse_unified_diff, summarize_record
 from remote_workbench.session_context import get_codex_identity
 
-RESOURCE_URI = 'ui://remote-workbench/operation-v5.html'
+RESOURCE_URI = 'ui://remote-workbench/operation-v6.html'
 CARD_TOOLS = frozenset({'exec_command', 'apply_patch'})
 PREVIEW_BYTES = 4096
 
@@ -69,7 +69,11 @@ def install(server, router):
     @server.resource(RESOURCE_URI, mime_type='text/html;profile=mcp-app',
                      meta={'ui': {'prefersBorder': True,
                                   'csp': {'connectDomains': [], 'resourceDomains': []}},
-                           'openai/ui': {'availableDisplayModes': ['inline']}})
+                           'openai/ui': {'availableDisplayModes': ['inline']},
+                           # Supported by the desktop host. Its default 200px
+                           # minimum otherwise overrides smaller size reports.
+                           'openai/widgetMinFrameHeight': 0,
+                           'openai/widgetHeightHint': 96})
     def operation_card() -> str:
         return Path(__file__).with_name('operation_card.html').read_text()
 

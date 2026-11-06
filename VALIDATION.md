@@ -1,5 +1,11 @@
 # Validation status
 
+## Desktop minimum-height follow-up (0.4.4)
+
+- A user screenshot of the actual 0.4.3 card still showed blank space. Its previous browser mock accepted small heights directly and omitted the installed host's default 200px minimum; those passing tests did not establish the desktop result.
+- A local replay now uses the installed host's unmodified height calculation and metadata captured through actual MCP `read_resource`. With identical component HTML, the old resource gives **200px** for 94px content, including after collapse. The new contents metadata (`openai/widgetMinFrameHeight=0`, compact height hint) gives **94 → 450 → 94px**; narrow dark output and diff checks also pass. Proprietary host fragments, screenshots and deployment details remain private and are excluded from Git and packages.
+- **31 targeted tests passed in 9.47 seconds.** The real stdio resource test checks that the minimum-height metadata reaches resource contents; the installer also checks it. The standard size notifications and content measurement remain unchanged, as do command results, records and model-visible text. Resource v6 avoids cached metadata. This replay is stronger component/host-rule evidence, but actual new desktop pixels still need confirmation after loading the new resource.
+
 ## Compact card layout and intrinsic height (0.4.3)
 
 - **31 targeted tests passed in 9.41 seconds**, covering actual local MCP/resource/result delivery, the renderer/bridge, original output/diff records, installation ordering and release checks. The preceding 864-test run belongs to 0.4.2; full branch CI is checked separately for this UI revision.

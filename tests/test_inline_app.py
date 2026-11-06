@@ -175,6 +175,8 @@ async def test_stdio_resource_catalog_and_missing_binding_are_safe(tmp_path):
             assert content.mimeType == 'text/html;profile=mcp-app'
             assert 'ui/initialize' in content.text
             assert content.meta['ui']['csp']['connectDomains'] == []
+            assert content.meta['openai/widgetMinFrameHeight'] == 0
+            assert 0 < content.meta['openai/widgetHeightHint'] < 200
             result = await client.call_tool('exec_command', {'command':'must never run'}, meta={'threadId':'local'})
             assert result.isError and 'no remote workspace' in result.content[0].text
 
