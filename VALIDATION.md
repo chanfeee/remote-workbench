@@ -1,5 +1,11 @@
 # Validation status
 
+## Actual App 0.4.5 card-history acceptance (2026-11-06)
+
+- After MCP reload, App-native workspace metadata reported the installed stable 0.4.5 package. Two short print commands completed through an existing manually authenticated SSH connection. Both saved MCP results retained v7 resources and different operation-based widget identities; the chat was then returned to local mode.
+- The user switched to another chat and returned, and confirmed that **both command cards remained visible**. This verifies the reported navigation/history case in the actual App. A complete App restart and UI output-pagination controls were not exercised in this follow-up; old saved cards without independent identities are not rewritten.
+- Stable commit `714ebec` passed all four Python 3.10–3.13 CI jobs and the package build. The installed fixed commit and existing session state were preserved; the project candidate override was removed, leaving enable/disable under the user's App settings. Exact host details, paths and operation identifiers remain in ignored local reports.
+
 ## Stable 0.4.5 integration (2026-11-06)
 
 - **869 tests passed in 215.65 seconds, with no skips**, after integrating the runtime simplification and independent inline-card identities. The complete suite used local workers, bounded process supervision, loopback services and simulated SSH, including real MCP stdio restart/recovery tests. No real CERN/IHEP command was run in this integration check.
