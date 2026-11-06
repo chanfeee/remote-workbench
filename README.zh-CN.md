@@ -2,6 +2,8 @@
 
 [English](README.md) | **简体中文**
 
+[v0.4.5 发行说明](docs/releases/v0.4.5.zh-CN.md) · [下载](https://github.com/chanfeee/remote-workbench/releases/tag/v0.4.5)
+
 Remote Workbench 让本地 Agent 在明确选定的 SSH 服务器和工程目录中执行命令、读写文件。Agent、MCP 服务和操作记录留在本地；远端运行普通命令及通过 SSH 发送的小型 Python worker，无需安装 Codex CLI 或独立服务。
 
 - 在本地与多台服务器之间切换，每个聊天独立保存绑定。
@@ -117,7 +119,7 @@ remote-workbench records --data-dir STATE_DIR --workspace-id WORKSPACE_ID --id O
 
 受管编辑记录本次修改。Git diff 是显式获取的当前差异；操作记录不会追踪任意 shell 命令或外部终端造成的所有文件写入。
 
-内联前端直接复用 liteRemote 的活动与文件审阅组件：按组展示命令、退出码和耗时，以及逐文件增删行数和可展开的彩色 diff。退出码 0 不覆盖远端完成／清理未知，审核拒绝和取消待确认分别显示。省去说明性页脚、可见记录 ID、重复命令标签和空分组。stable 0.4.5 已在实际 App 加载并通过真实 SSH 调用；用户确认切换聊天再返回后，两张连续命令卡片均保留。完整 App 重启与 UI 分页仍需分别验收，不据此推导接近本地的 token／耗时结果。
+内联前端直接复用 liteRemote 的活动与文件审阅组件：按组展示命令、退出码和耗时，以及逐文件增删行数和可展开的彩色 diff。退出码 0 不覆盖远端完成／清理未知，审核拒绝和取消待确认分别显示。省去说明性页脚、可见记录 ID、重复命令标签和空分组。stable 0.4.5 已在实际 App 加载并通过真实 SSH 调用；用户确认切换聊天再返回后，两张命令卡片和两张 diff 卡片均保留，逐行 diff 可以展开查看。完整 App 重启与 UI 分页仍需分别验收，不据此推导接近本地的 token／耗时结果。
 
 查看图片时，可以让 Agent 展示远端 PNG/JPG 或 PDF 的指定页。`fetch_image` 保存本地副本并返回聊天预览引用，不将 base64 放入 MCP 文本。PDF/SVG 预览需要可选的本地渲染包：
 
