@@ -7,7 +7,7 @@ Remote Workbench 让本地 Agent 在明确选定的 SSH 服务器和工程目录
 - 在本地与多台服务器之间切换，每个聊天独立保存绑定。
 - 通过冲突检查读写文件，查看命令、输出和受管修改。
 - 启动、查询、停止后台任务，并按原执行位置恢复。
-- 用可选 HTML 页面查看本地记录，将远端图片拉取到聊天中展示。
+- 用 App 只读内联卡片查看操作，通过 CLI 查询本地记录，将远端图片拉取到聊天中展示。
 
 ## 快速开始
 
@@ -87,17 +87,33 @@ Session 路由依赖客户端提供 `_meta.threadId`；缺少可用的聊天身�
 
 `0.4.0` 源码直接使用规范化后的实际目录，不再提供工程副本模式、交付接口或旧副本任务恢复。已有目录和本地记录不删除，工作时重新选择实际目录。旧 stable 安装在单独升级前保持原有行为。
 
-聊天独立指绑定和记录独立；direct 模式允许多个聊天共享代码，运行状态放在代码目录之外。协作写入协调覆盖使用同一本地状态目录的新版 MCP 进程及重叠的选定目录，不隔离外部终端、其他控制端或选定目录之外的任意写入。范围与恢复方式见[目录模式契约](docs/workspace-mode-contract.zh-CN.md)。
+聊天独立指绑定和记录独立；多个聊天可以共享同一实际目录。`0.4.2` 按实际文件协调受管编辑，不同文件可以并行修改，命令和后台任务不占用目录。文件锁由同一远端账号、同一锁命名空间下的新版 worker 共享，不依赖聊天 target。普通 shell 和外部编辑器内部的写入不被拦截。范围与恢复方式见[目录模式契约](docs/workspace-mode-contract.zh-CN.md)。
 
-**本地未发布修复：** 工作区、build 和 run 目录无需是 Git 仓库。快照编辑与文件编辑不依赖 Git，仍在本地操作记录中保留每次修改的 diff；只有 Git 状态/差异查询需要仓库。绑定目录不探测 Git，也不初始化仓库。
+**普通目录：** 工作区、build 和 run 目录无需是 Git 仓库。快照编辑与文件编辑不依赖 Git，仍在本地操作记录中保留每次修改的 diff；只有 Git 状态/差异查询需要仓库。绑定目录不探测 Git，也不初始化仓库。
 
 ## 命令、记录与图片
 
-工具回复提供有界输出和 **Remote Workbench 操作记录** 链接，供 Agent 在聊天中展示。完整命令输出和 diff 保留在本地记录中，需要时通过 `read_output` 分页读取。
+工具回复提供有界输出及稳定的 operation/output ID。完整命令输出和 diff 保留在本地记录中，需要时通过 `read_output` 分页读取。
 
-可选 HTML 查看器只读，默认自动刷新。每个进程使用可用的本机回环端口和独立 URL 前缀，可与其他本地页面并存。MCP 重启后使用新回复中的链接；关闭页面不影响执行，也不会删除记录。
+`0.4.2` 支持 `exec_command(host=..., cwd=..., command=..., stdin=...)`，一次选择明确目标并执行。可选 `read_files`／`edit_files` 在确认命令结束后返回选定文件，包括非零退出，路径相对于命令的实际 cwd。`apply_patch(patch=...)` 接受本地同款补丁和新增文件，也可在同次调用中运行检查并返回选定文件；`edit_files` 提供检查后文件内容的冲突保护引用。`0.4.2` 的补丁路径以所选或显式 cwd 为基准，Git 子目录也不例外。未知、超时或被拒绝执行时不继续读取。命令、输入输出和受管 diff 自动记录。见[调用示例](docs/tool-call-syntax.zh-CN.md)；实际 App／SSH 的验收范围见[验证记录](VALIDATION.md)，接近本地的耗时／token 目标尚未验证。独立 stable 安装另行更新。
+
+`0.4.2` 的 MCP 入口不再启动独立 HTML 服务、不分配查看页端口，也不返回网页链接。关闭内联卡片不影响执行，也不会删除记录。旧 stable 安装在明确升级前保留原有行为。
+
+**内联操作卡片：** `exec_command` 和 `apply_patch` 声明只读 MCP Apps 卡片，兼容客户端可在聊天中直接显示记录的服务器、实际 cwd、命令、进程状态、有界输出或受管 diff。“继续读取”通过 UI 桥接调用已有的本地 `read_output`，不重新执行命令，也不需要模型渲染页面。预览放在结果 `_meta` 中，模型可见的结果文本不变，工具目录仍为 8 项。组件不加载外部资源，也不请求本机 HTTP 页面。不支持内联组件的客户端保留普通工具结果、本地记录和 CLI 查询。独立 stable 安装和审批设置另行更新。
+
+关闭 App 后，仍可使用 `workspace_info` 中的本地状态目录和 workspace ID 查看已有记录：
+
+```sh
+remote-workbench records --data-dir STATE_DIR --workspace-id WORKSPACE_ID
+remote-workbench records --data-dir STATE_DIR --workspace-id WORKSPACE_ID --id OPERATION_ID
+remote-workbench records --data-dir STATE_DIR --workspace-id WORKSPACE_ID --id OUTPUT_ID --stream stdout --cursor 0 --max-bytes 4096
+```
+
+该命令只读本地已有文件，不连接 SSH，也不启动网页服务。
 
 受管编辑记录本次修改。Git diff 是显式获取的当前差异；操作记录不会追踪任意 shell 命令或外部终端造成的所有文件写入。
+
+内联前端直接复用 liteRemote 的活动与文件审阅组件：按组展示命令、退出码和耗时，以及逐文件增删行数和可展开的彩色 diff。退出码 0 不覆盖远端完成／清理未知，审核拒绝和取消待确认分别显示。省去说明性页脚、可见记录 ID、重复命令标签和空分组。此前候选已在 App 加载并通过真实 SSH 调用；本次前端修订仍待桌面渲染验收。本地桥接测试不代表实际 UI 分页或接近本地的 token／耗时目标已通过。
 
 查看图片时，可以让 Agent 展示远端 PNG/JPG 或 PDF 的指定页。`fetch_image` 保存本地副本并返回聊天预览引用，不将 base64 放入 MCP 文本。PDF/SVG 预览需要可选的本地渲染包：
 

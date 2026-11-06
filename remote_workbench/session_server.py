@@ -17,21 +17,21 @@ import uuid
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.server.fastmcp.tools.base import Tool
+from mcp.types import ToolAnnotations
 
 from remote_workbench import audit, job_collector
-from remote_workbench.audit_web import handler_for_workspaces
 from remote_workbench.config import load_config
 from remote_workbench.session_context import get_codex_identity, request_metadata, SessionIdentityUnavailable
-from remote_workbench.workspace import TOOLS, bind_tool, _local_audit_viewer
+from remote_workbench.workspace import TOOLS, bind_tool
 from remote_workbench.workspace_router import SessionRouter, default_state_dir
 from remote_workbench.workspace_registry import WorkspaceTarget
 from remote_workbench.workspace_snapshot import collect as collect_snapshot
 from remote_workbench import baseline
 from remote_workbench.auth_boundary import authentication_command, refusal
-from remote_workbench.call_arguments import validate_call_arguments
+from remote_workbench.call_arguments import selected_files, validate_call_arguments, validate_output_budget
 from remote_workbench.edit_spec import PreparedEdit
 from remote_workbench.command_spec import Command, normalize_arguments
-from remote_workbench.tool_interface import INSTRUCTIONS, TOOL_NAMES, present_result
+from remote_workbench.tool_interface import INSTRUCTIONS, READ_ONLY_TOOL_NAMES, TOOL_NAMES, present_result
 
 _LOCAL_TOOLS = {"audit_list", "audit_get", "read_output", "search_output"}
 _JOB_CONTROL_TOOLS = {"job_status", "stop_job", "job_wait"}
@@ -44,8 +44,15 @@ _SESSION_LOCAL_TOOLS = {"workspace_resume", "workspace_note"}
 _UNLOCKED_TOOLS = _LOCAL_TOOLS | _JOB_CONTROL_TOOLS | {
     "workspace_info", "workspace_history", "resolve_operation"
 } | _READ_ONLY_REMOTE_TOOLS | _SESSION_LOCAL_TOOLS
-_BUDGETS = {"exec_command": 2048, "read_file": 4096, "patch_file": 4096,
+_BUDGETS = {"exec_command": 16384, "read_file": 4096, "patch_file": 4096,
             "git_diff": 4096, "start_job": 8192}
+
+
+def _command_finished_for_reads(result):
+    """A confirmed nonzero exit still supplies useful files for fixing a failure."""
+    return (isinstance(result, dict) and result.get('execution_state') == 'finished'
+            and type(result.get('exit_code')) is int and not result.get('error')
+            and not result.get('timed_out') and result.get('executed') is not False)
 
 
 def _job_origin_record(target, job_id, *, origin_nonce, launch_cwd, remote_state_dir,
@@ -98,8 +105,7 @@ def create_identity_probe(*, viewer_url: str | None = None, audit_dir: Path) -> 
     """A local diagnostic with no host configuration or remote execution tools."""
     server = FastMCP("remote-workbench-identity-probe", instructions=(
         "Read-only local MCP metadata diagnostic. session_identity_probe reports the conversation "
-        "identity supplied by the actual client. It does not connect to SSH or select a workspace. "
-        "Include the returned operation_log link in your user-facing result."
+        "identity supplied by the actual client. It does not connect to SSH or select a workspace."
     ))
 
     @server.tool(structured_output=False)
@@ -117,8 +123,6 @@ def create_identity_probe(*, viewer_url: str | None = None, audit_dir: Path) -> 
         with audit.scoped_root(audit_dir):
             record = audit.create(kind="tool", tool="session_identity_probe", status="finished", **result)
             result["operation_id"] = record
-            if viewer_url:
-                result["operation_log"] = f"[**Remote Workbench 操作记录**]({viewer_url}/?id={record})"
         return json.dumps(result, ensure_ascii=False, separators=(",", ":"))
 
     return server
@@ -172,25 +176,10 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
     handlers = {}
     schemas = {}
     executors = {}
-    linked_workspaces = set()
     server = SessionMCP("remote-workbench-session", instructions=INSTRUCTIONS)
-
-    def workspace_url(state):
-        return f"{viewer_url}/w/{state.workspace_id}/" if viewer_url else None
 
     def pack(result, state, name=None, arguments=None):
         result = present_result(name, dict(result), arguments)
-        url = workspace_url(state)
-        following = result.get('command_result', {})
-        needs_link = (state.workspace_id not in linked_workspaces
-                      or name in {"workspace_info", "workspace_switch", "workspace_use_local", "workspace_resume"}
-                      or result.get("error") or result.get("initial_error") or result.get("timed_out")
-                      or result.get("exit_code") not in (None, 0)
-                      or following.get('error') or following.get('timed_out')
-                      or following.get('exit_code') not in (None, 0))
-        if url and needs_link:
-            result["operation_log"] = f"[**Remote Workbench 操作记录**]({url})"
-            linked_workspaces.add(state.workspace_id)
         return json.dumps(result, ensure_ascii=False, separators=(",", ":"), default=str)
 
     async def info(state, identity, **arguments):
@@ -206,7 +195,7 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
                              "python_executable": sys.executable, "config_path": router.config.source_path,
                              "data_dir": str(router.state_dir)},
                     remote_state_dir=router.registry.direct_state_dir(state.target_id) if state.host else None,
-                    shell_state_reused=False, managed_write_claims=[c for c in router.resources.active() if c["workspace_id"] == state.workspace_id])
+                    shell_state_reused=False, write_coordination="managed-files")
 
     async def history(state, identity, limit: int = 20):
         return {"targets": router.registry.history(state.workspace_id, limit)}
@@ -380,7 +369,6 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
             "next_step": "Use job_status or job_wait to inspect the same job; both route to its saved target.",
         }
         if isinstance(local_job, dict):
-            router.resources.reconcile(state.workspace_id, operation.job_id, local_job)
             result["local_job"] = local_job
             if local_job.get("error"):
                 result["local_job_state"] = "unavailable"
@@ -449,15 +437,30 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
             # into an apparent tool failure that invites a dangerous retry.
             print("Remote Workbench communication accounting unavailable", file=sys.stderr)
 
+    async def read_selection(snapshot, identity, selected, max_bytes, *, cwd=None, parent_id=None):
+        from remote_workbench.tools.files import read_selected
+        with audit.scoped_metadata(**snapshot.metadata(), client_session_id=identity.session_id):
+            token = audit.operation_id.set(parent_id) if parent_id else None
+            try:
+                return await read_selected(snapshot.workspace.executor, selected,
+                                           max_bytes=min(max_bytes, 65536), cwd=cwd)
+            except (OSError, ValueError) as exc:
+                # A completed command must not look retryable because its
+                # optional follow-up read failed. Preserve its original result.
+                return [{'requested_path': path, 'error': 'read_failed', 'message': str(exc)[:512]}
+                        for path, _ in selected]
+            finally:
+                if token is not None:
+                    audit.operation_id.reset(token)
+
     async def switch(state, identity, host: str, cwd: str, expected_revision: int | None = None,
                      command: Command | None = None, max_bytes: int = 4096,
                      timeout: int | None = None, compute_review: dict | None = None,
                      read_files: list[str] | None = None,
                      edit_files: list[str] | None = None):
-        selected = [(p, False) for p in (read_files or [])] + [(p, True) for p in (edit_files or [])]
-        if (len(selected) > 16 or len({p for p, _ in selected}) != len(selected)
-                or any(not p or '\x00' in p or p.startswith('~') for p, _ in selected)):
-            raise ValueError('Select at most 16 distinct file paths without NUL or ~')
+        selected = selected_files(read_files, edit_files)
+        if selected:
+            validate_output_budget(max_bytes)
         record = audit.create(kind="tool", tool="workspace_switch", status="running",
                               arguments={"host": host, "cwd": cwd, "expected_revision": expected_revision})
         token = audit.operation_id.set(record)
@@ -482,18 +485,11 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
                     result["initial_error"] = str(exc)
             if selected:
                 initial = result.get('initial', {})
-                if (result.get('initial_error') or initial.get('error') or initial.get('timed_out')
-                        or initial.get('executed') is False or initial.get('exit_code') not in (None, 0)):
+                if result.get('initial_error') or (command is not None and not _command_finished_for_reads(initial)):
                     result['files_skipped'] = 'initial_command_not_successful'
                 else:
-                    result['files'] = []
-                    for path, for_edit in selected:
-                        try:
-                            item = await executors['read_file'](updated, identity, path=path,
-                                offset=0, limit=160, max_bytes=max_bytes, for_edit=for_edit, local_copy=False)
-                        except Exception as exc:
-                            item = {'error': 'read_failed', 'message': str(exc)[:512]}
-                        result['files'].append(dict(item, requested_path=path))
+                    snapshot = router.snapshot(updated)
+                    result['files'] = await read_selection(snapshot, identity, selected, max_bytes, parent_id=record)
             return result
         except BaseException as exc:
             audit.update(record, status="failed", error=str(exc))
@@ -567,9 +563,7 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
                     state = router.registry.get(state.workspace_id)
                     return await run_scoped(state)
             except Exception as exc:
-                url = workspace_url(state)
-                link = f"\n\n[**Remote Workbench 操作记录**]({url})" if url else ""
-                text = str(exc) + link
+                text = str(exc)
                 record_metrics(state, name, arguments, text, started, failed=True)
                 raise ToolError(text) from exc
 
@@ -579,28 +573,35 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
         invoke.__annotations__ = {p.name: p.annotation for p in signature.parameters.values()}
         invoke.__annotations__["return"] = str
         handlers[name] = invoke
-        schemas[name] = Tool.from_function(invoke, structured_output=False)
+        annotations = (ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False)
+                       if name in READ_ONLY_TOOL_NAMES else None)
+        schemas[name] = Tool.from_function(invoke, structured_output=False, annotations=annotations)
         if name == 'read_file':
-            async def read_file(path: str, offset: int = 0, limit: int = 160,
+            async def read_file(path: str | list[str], offset: int = 0, limit: int = 160,
                                 max_bytes: int = 4096, for_edit: bool = False, ctx: Context = None) -> str:
                 return await handlers['read_file'](path=path, offset=offset, limit=limit,
                                                    max_bytes=max_bytes, for_edit=for_edit, local_copy=False, ctx=ctx)
-            read_file.__doc__ = 'Read numbered lines; for_edit=true returns an edit_id for guarded updates. No probe or metadata discovery is needed.'
-            server.tool(structured_output=False)(read_file)
+            read_file.__doc__ = 'Read one path or a list of up to 16 explicit paths in one call/SSH request. for_edit=true returns edit_ids for guarded updates. offset/limit/max_bytes apply per file; no project scan.'
+            server.tool(structured_output=False, annotations=annotations)(read_file)
         elif name == "apply_patch":
-            # The primary editing schema has no model-authored patch language.
-            # Keep the compatible raw form in schemas[] for the advanced gateway.
-            async def structured_apply_patch(edits: list[PreparedEdit], cwd: str = ".", check_only: bool = False,
+            # Use the same patch language as local editing. Existing explicit
+            # snapshots remain supported, without being a compulsory handshake.
+            async def structured_apply_patch(patch: str | list[str] | None = None,
+                                             edits: list[PreparedEdit] | None = None,
+                                             cwd: str = ".", check_only: bool = False,
                                              command: Command | None = None, timeout: int | None = None,
-                                             max_bytes: int = 4096, compute_review: dict | None = None,
+                                             max_bytes: int = 16384, compute_review: dict | None = None,
+                                             read_files: list[str] | None = None,
+                                             edit_files: list[str] | None = None,
                                              ctx: Context = None) -> str:
-                return await handlers["apply_patch"](edits=edits, cwd=cwd, check_only=check_only,
-                    command=command, timeout=timeout, max_bytes=max_bytes, compute_review=compute_review, ctx=ctx)
+                return await handlers["apply_patch"](patch=patch, edits=edits, cwd=cwd, check_only=check_only,
+                    command=command, timeout=timeout, max_bytes=max_bytes, compute_review=compute_review,
+                    read_files=read_files, edit_files=edit_files, ctx=ctx)
             structured_apply_patch.__name__ = "apply_patch"
             structured_apply_patch.__doc__ = (
-                "Read with for_edit=true, then edits=[{edit_id,new:[source lines]}] for the whole file; optional start_line/end_line select a range. No old text or patch markers. "
-                "command optionally runs explicit checks only after successful apply, under the same binding/write claim. Returns next edit_ids. "
-                "check_only previews; cannot combine with command. Raw patches/Add/Delete: workspace_tools('apply_patch').")
+                "Apply local-style context patches (Add/Delete supported) or unified diffs. Optional edits use guarded snapshots; pass patch or edits. "
+                "command runs shell/argv/batch checks after success. read_files/edit_files explicitly return files after edits/checks; edit_files includes fresh guarded IDs. "
+                "check_only cannot run command. Full patch/diff is recorded.")
             server.tool(structured_output=False)(structured_apply_patch)
             tool_metadata = server._tool_manager.get_tool("apply_patch")
             model = tool_metadata.fn_metadata.arg_model
@@ -608,7 +609,7 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
             model.model_rebuild(force=True)
             tool_metadata.parameters = model.model_json_schema()
         else:
-            server.tool(structured_output=False)(invoke)
+            server.tool(structured_output=False, annotations=annotations)(invoke)
 
     for name, function, description in (
         ("workspace_info", info, "Inspect this thread's persistent workspace and metadata identity. No remote execution."),
@@ -617,8 +618,8 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
         ("workspace_note", note, "Read or update this thread's small local recovery note (goal, constraints, decisions, next_step)."),
         ("resolve_operation", resolve_operation, "Recover the same background job by its idempotency_key after a lost response. This may make a read-only SSH status request to the saved origin, then reconnects local log collection; it never starts a second job."),
         ("workspace_snapshot", workspace_snapshot, "Inspect current remote Git state and measured response bytes. Project contents are not scanned unless scan_content=true; then the scan is bounded by max_files and max_content_bytes. No test history is compared."),
-        ("workspace_switch", switch, "Bind an explicit host and actual cwd without copying code. Jobs retain their original target when this chat switches directories."),
-        ("workspace_use_local", use_local, "Clear this thread's active remote binding and return to native local tools. Remote targets, private copies, history, and job origins remain available."),
+        ("workspace_switch", switch, "Bind or switch an explicit host and actual cwd without copying code. Optional command/read_files/edit_files combine work; exec_command can also bind directly. Jobs keep their original target."),
+        ("workspace_use_local", use_local, "Clear this chat's remote binding and use native local tools. Saved targets, records and job origins remain available."),
     ):
         signature = inspect.signature(function, eval_str=True)
         signature = signature.replace(parameters=[p for p in signature.parameters.values()
@@ -626,24 +627,39 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
         register(name, signature, description, function)
 
     for name, function, description in TOOLS:
+        if name == 'exec_command':
+            description = ('Run shell text, argv or {commands:[argv,...]} in the selected directory. '
+                'Optional host + absolute cwd binds and runs together; repeat the same target without rebinding. '
+                'read_files/edit_files return selected files after confirmed completion, including nonzero exits; edit_files includes guarded edit_ids. '
+                'Paths use the command cwd; max_bytes applies to command/per file. stdin is exact text. '
+                'Fresh account shell; activate environments per call.')
         signature = inspect.signature(function, eval_str=True)
         public = signature.replace(parameters=[
             p.replace(default=".") if p.name == "cwd" else p.replace(default=_BUDGETS[name])
             if p.name == "max_bytes" and name in _BUDGETS else p
-            for p in signature.parameters.values() if p.name != "host"])
+            for p in signature.parameters.values() if p.name != "host" or name == 'exec_command'])
         if name == 'apply_patch':
             public = public.replace(parameters=[*public.parameters.values(),
                 inspect.Parameter('command', inspect.Parameter.POSITIONAL_OR_KEYWORD, default=None, annotation=Command | None),
                 inspect.Parameter('timeout', inspect.Parameter.POSITIONAL_OR_KEYWORD, default=None, annotation=int | None),
-                inspect.Parameter('max_bytes', inspect.Parameter.POSITIONAL_OR_KEYWORD, default=4096, annotation=int),
+                inspect.Parameter('max_bytes', inspect.Parameter.POSITIONAL_OR_KEYWORD, default=16384, annotation=int),
                 inspect.Parameter('compute_review', inspect.Parameter.POSITIONAL_OR_KEYWORD, default=None, annotation=dict | None)])
+        if name in {'exec_command', 'apply_patch'}:
+            public = public.replace(parameters=[*public.parameters.values(),
+                inspect.Parameter('read_files', inspect.Parameter.POSITIONAL_OR_KEYWORD, default=None, annotation=list[str] | None),
+                inspect.Parameter('edit_files', inspect.Parameter.POSITIONAL_OR_KEYWORD, default=None, annotation=list[str] | None)])
 
         async def execute(state, identity, _name=name, _function=function, **arguments):
             after = None
+            selected = (selected_files(arguments.pop('read_files', None), arguments.pop('edit_files', None))
+                        if _name in {'exec_command', 'apply_patch'} else [])
+            selection_budget = arguments.get('max_bytes', 16384)
+            if selected:
+                validate_output_budget(selection_budget)
             if _name == 'apply_patch':
                 after_command = arguments.pop('command', None)
                 options = {k: arguments.pop(k, default) for k, default in
-                           [('timeout', None), ('max_bytes', 4096), ('compute_review', None)]}
+                           [('timeout', None), ('max_bytes', 16384), ('compute_review', None)]}
                 if after_command is not None:
                     if arguments.get('check_only'):
                         raise ValueError('check_only cannot run command')
@@ -652,6 +668,37 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
             validate_call_arguments(_name, arguments)
             if _name in _LOCAL_TOOLS:
                 return await _function(**arguments)
+            requested_host = arguments.pop('host', None) if _name == 'exec_command' else None
+            if requested_host is not None:
+                # An explicit target may be selected in the same operation.
+                # New chats without one still fail closed in router.snapshot.
+                selected_cwd = arguments.get('cwd')
+                if not requested_host or not isinstance(selected_cwd, str) or not selected_cwd.startswith('/'):
+                    raise ValueError('An inline host requires an explicit absolute cwd')
+                config = router.config.get_host(requested_host)
+                if authentication_command(arguments.get('command', '')):
+                    refused = audit.create(kind='tool', tool='exec_command', status='failed',
+                        arguments={'command':'[authentication arguments omitted]'},
+                        host=requested_host, cwd=selected_cwd, error='authentication_requires_user_terminal')
+                    return dict(refusal(), operation_id=refused)
+                from remote_workbench.compute_review import check_compute_review
+                from remote_workbench.call_arguments import command_text
+                selected_commands = arguments['command']
+                review_commands = selected_commands['commands'] if isinstance(selected_commands, dict) else [selected_commands]
+                for item in review_commands:
+                    pending = check_compute_review(command_text(item), selected_cwd, config.ssh_target,
+                        arguments.get('compute_review'), config.compute_review_threshold)
+                    if pending:
+                        return pending
+                # Repeating an already-canonical target has the same semantics
+                # as omitting host. Keep the immutable target and revision;
+                # a different path/alias or explicit workspace_switch still
+                # performs directory validation. Command connection checks,
+                # supervision and write coordination remain in the normal path.
+                if (requested_host != state.host or selected_cwd != state.cwd
+                        or router.requires_directory_selection(state)):
+                    state = await router.switch(state, requested_host, selected_cwd)
+                arguments['cwd'] = '.'
             target = router.registry.get_job(state.workspace_id, arguments["job_id"]) if _name in _JOB_CONTROL_TOOLS else None
             if target is not None and target.host not in router.config.hosts:
                 return {"job_id": arguments["job_id"], "error": "job_origin_unavailable",
@@ -675,7 +722,7 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
                 from remote_workbench.edit_spec import prepared_edits
                 if prepared_edits(arguments.get('edits')):
                     from remote_workbench.prepared_edit import normalize
-                    # Resolve local bytes and origin before acquiring a write claim or contacting SSH.
+                    # Resolve local bytes and origin before contacting SSH.
                     normalize(arguments, snapshot.workspace.executor)
             if (_name in {"exec_command", "start_job"} and
                     authentication_command(arguments.get("command", ""))):
@@ -789,36 +836,18 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
                         launch_cwd=launch_cwd, remote_state_dir=remote_state_dir,
                         ssh_target=ssh_target)
             tool = bind_tool(snapshot.workspace, _name, _function, "")
+            submission_state = None
             with audit.scoped_metadata(**snapshot.metadata(), client_session_id=identity.session_id):
                 try:
-                    writes = _name in {"exec_command", "start_job", "write_file", "patch_file", "apply_patch"}
-                    claim = None
-                    if writes and not arguments.get("check_only", False):
-                        declared_cwd = snapshot.workspace.resolve_cwd(arguments.get("cwd"))
-                        resource_root = posixpath.commonpath([snapshot.cwd, declared_cwd])
-                        if _name == 'apply_patch' and arguments.get('expected_files'):
-                            resource_root = posixpath.commonpath([resource_root, *[
-                                posixpath.dirname(path) for path in arguments['expected_files']]])
-                        if _name in {"write_file", "patch_file"} and isinstance(arguments.get("path"), str):
-                            file_path = posixpath.normpath(posixpath.join(declared_cwd, arguments["path"]))
-                            resource_root = posixpath.commonpath([resource_root, posixpath.dirname(file_path)])
-                        try:
-                            claim = router.resources.acquire(
-                                snapshot.workspace.executor.config.ssh_target, resource_root,
-                                state.workspace_id, _name)
-                        except ValueError:
-                            # No remote submission occurred. A caller may retry
-                            # the same key when the conflicting workload ends.
-                            if job_operation is not None:
-                                router.registry.update_job_operation(
-                                    state.workspace_id, idempotency_key, "rejected")
-                                job_operation = None
-                            raise
-                        if _name == "start_job":
-                            router.resources.attach_job(claim, arguments["job_id"])
-                    with job_collector.scoped_origin(job_origin):
+                    from remote_workbench.resource_claims import submission
+                    with submission() as submission_state, job_collector.scoped_origin(job_origin):
                         result = await tool(**arguments)
-                        if _name == 'apply_patch' and result.get('success') and not arguments.get('check_only'):
+                        if requested_host is not None:
+                            result['host'] = snapshot.host
+                            result['cwd'] = (result.get('remote_task') or {}).get('actual_cwd') or snapshot.cwd
+                        if (_name == 'apply_patch' and result.get('success') and not arguments.get('check_only')
+                                and not result.get('error') and not result.get('timed_out')
+                                and result.get('execution_state') in (None, 'finished')):
                             if arguments.get('prepared_contents') is not None:
                                 from remote_workbench.prepared_edit import applied_refs
                                 try:
@@ -858,14 +887,12 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
                                     result['audit_warning'] = 'following_command_link_incomplete'
                         elif after is not None:
                             result['command_skipped'] = 'apply_not_successful'
-                    if claim:
-                        router.resources.finish(claim, result.get('command_result', result),
-                            background=_name == "start_job", shell=_name == "exec_command" or 'command_result' in result)
                 except BaseException:
                     if job_operation is not None:
                         try:
                             router.registry.update_job_operation(
-                                state.workspace_id, idempotency_key, "unknown")
+                                state.workspace_id, idempotency_key,
+                                "unknown" if submission_state is not None and submission_state.submitted else "rejected")
                         except (sqlite3.Error, OSError, ValueError):
                             print("Remote Workbench job retry state unavailable", file=sys.stderr)
                     raise
@@ -883,8 +910,6 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
                     except (ValueError, sqlite3.Error, OSError) as exc:
                         result = dict(result, execution_state="unknown",
                                       state_reason="actual_cwd_conflict", error=str(exc))
-            if _name in _JOB_CONTROL_TOOLS:
-                router.resources.reconcile(state.workspace_id, arguments["job_id"], result)
             if job_operation is not None:
                 if result.get("executed") is False:
                     operation_state = "rejected"
@@ -901,6 +926,20 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
                     print("Remote Workbench job retry state unavailable", file=sys.stderr)
                 result = dict(result, idempotency_key=idempotency_key,
                               operation_state=operation_state, job_id=job_operation.job_id)
+            if selected:
+                observed = result.get('command_result', result) if _name == 'apply_patch' else result
+                if _name == 'apply_patch' and (not result.get('success') or result.get('error')
+                        or result.get('timed_out') or result.get('executed') is False
+                        or result.get('execution_state') not in (None, 'finished')):
+                    result['files_skipped'] = 'apply_not_successful'
+                elif (_name == 'exec_command' or after is not None) and not _command_finished_for_reads(observed):
+                    result['files_skipped'] = 'command_not_successful'
+                else:
+                    effective_cwd = ((observed.get('remote_task') or {}).get('actual_cwd')
+                                     or snapshot.workspace.resolve_cwd(arguments.get('cwd')))
+                    result['files'] = await read_selection(snapshot, identity, selected,
+                        selection_budget, cwd=effective_cwd,
+                        parent_id=result.get('operation_id') or result.get('output_id'))
             return result
 
         register(name, public, description, execute)
@@ -929,6 +968,8 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
         if unknown:
             raise ToolError("Unknown argument names: " + ", ".join(sorted(unknown)))
         return await schemas[tool].run(arguments, context=ctx)
+    from remote_workbench.inline_app import install as install_inline_app
+    install_inline_app(server, router)
     return server
 
 
@@ -936,22 +977,18 @@ def main():
     parser = argparse.ArgumentParser(description="Local, persistent Codex thread-aware remote workspace MCP (prototype)")
     parser.add_argument("--config", help="Host allowlist YAML; uses the normal Remote Workbench configuration by default")
     parser.add_argument("--data-dir", type=Path, default=default_state_dir(), help="Private local registry/audit directory")
-    parser.add_argument("--viewer-port", type=int, default=0, help="Local viewer port (default 0: OS-assigned); falls back if occupied")
+    # Old installed launchers may still pass this spelling. It opens no listener.
+    parser.add_argument("--viewer-port", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--identity-probe", action="store_true", help="Expose only a local metadata diagnostic, without host configuration or remote tools")
     parser.add_argument("--tool-profile", choices=("full", "compact"), default=None,
                         help=argparse.SUPPRESS)  # legacy spelling, no behavior switch
     args = parser.parse_args()
     if args.identity_probe:
         directory = args.data_dir.expanduser().resolve() / "identity-probe"
-        with _local_audit_viewer(args.viewer_port, audit_dir=directory) as viewer:
-            url = viewer.viewer_url
-            create_identity_probe(viewer_url=url, audit_dir=directory).run()
+        create_identity_probe(audit_dir=directory).run()
         return
     router = SessionRouter(load_config(args.config), args.data_dir)
-    with _local_audit_viewer(args.viewer_port, handler=handler_for_workspaces(router.state_dir / "audit")) as viewer:
-        url = viewer.viewer_url
-        print(f"Local session audit viewer: {url}", file=sys.stderr, flush=True)
-        create_server(router, viewer_url=url, tool_profile=args.tool_profile).run()
+    create_server(router, tool_profile=args.tool_profile).run()
 
 
 if __name__ == "__main__":

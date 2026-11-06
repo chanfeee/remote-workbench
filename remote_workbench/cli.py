@@ -22,7 +22,7 @@ Usage:
   remote-workbench proxy status                                 Show whether the gateway is running
   remote-workbench proxy stop                                   Tear down the ~/.ssh/config gateway alias
   remote-workbench launch [--agent claude|opencode] <host>      tmux + SSH master + agent (Unix)
-  remote-workbench web [host] [--port N]                        Web UI
+  remote-workbench records --workspace-id ID [--data-dir PATH]  Read local saved records without a web page
   remote-workbench help                                         Show this message
 
 Environment:
@@ -383,6 +383,11 @@ def main() -> None:
         ssh_main()
         return
 
+    if cmd == 'records':
+        from remote_workbench.records_cli import main as records_main
+        records_main(rest)
+        return
+
     if cmd == "establish":
         _exec_establish(rest)
         return
@@ -393,12 +398,6 @@ def main() -> None:
 
     if cmd == "launch":
         _exec_launcher(rest)
-        return
-
-    if cmd == "web":
-        sys.argv = ["remote-workbench-web", *rest]
-        from remote_workbench.web.__main__ import main as web_main
-        web_main()
         return
 
     print(f"remote-workbench: unknown command {cmd!r}", file=sys.stderr)

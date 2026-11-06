@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 from pathlib import Path
 import stat
 import subprocess
@@ -20,7 +21,7 @@ from contextlib import contextmanager
 if "login_spec" not in globals():
     from remote_workbench.remote_shell import login_spec
 if "prepared_file_patch" not in globals():
-    from remote_workbench.native_patch import compile_native_patch, prepared_file_patch
+    from remote_workbench.native_patch import compile_native_patch, native_patch_paths, patch_path, prepared_file_patch
 
 
 def state_root():
@@ -29,18 +30,77 @@ def state_root():
 
 
 @contextmanager
-def lock(path):
-    # One writer lock per remote user also coordinates Git patches with file
-    # replacements. Keep bookkeeping outside repositories.
-    base = state_root() / "locks"
+def lock(paths):
+    # All targets/chats on this account share the same per-file namespace.
+    # Locks live outside code and are released by the OS when a worker exits.
+    if isinstance(paths, (str, Path)):
+        paths = [paths]
+    names = sorted({str(Path(path).resolve()) for path in paths})
+    base = Path.home() / ".cache" / "remote-workbench-ssh" / "file-locks"
     base.mkdir(parents=True, exist_ok=True, mode=0o700)
-    lockpath = base / "writer.lock"
-    fd = os.open(lockpath, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    held = []
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        yield
+        # Deterministic order prevents deadlocks between overlapping patches.
+        for name in names:
+            lockpath = base / (hashlib.sha256(os.fsencode(name)).hexdigest() + ".lock")
+            fd = os.open(lockpath, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
+            held.append(fd)
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        yield tuple(held)
     finally:
-        os.close(fd)
+        for fd in reversed(held):
+            os.close(fd)
+
+
+def _git_path(text):
+    """Decode Git's C-quoted rename/copy header, including UTF-8 octal bytes."""
+    if not text.startswith('"'):
+        return text
+    if not text.endswith('"'):
+        raise ValueError('Invalid quoted patch path')
+    raw, result, i = text.encode('utf-8')[1:-1], bytearray(), 0
+    escapes = {ord(k): v for k, v in {'a': 7, 'b': 8, 't': 9, 'n': 10,
+               'v': 11, 'f': 12, 'r': 13, '"': 34, '\\': 92}.items()}
+    while i < len(raw):
+        value = raw[i]
+        i += 1
+        if value == 92:
+            if i == len(raw):
+                raise ValueError('Invalid quoted patch path')
+            if 48 <= raw[i] <= 55:
+                start = i
+                while i < min(start + 3, len(raw)) and 48 <= raw[i] <= 55:
+                    i += 1
+                value = int(raw[start:i], 8)
+            else:
+                value = escapes.get(raw[i])
+                i += 1
+                if value is None:
+                    raise ValueError('Invalid quoted patch escape')
+        result.append(value)
+    return os.fsdecode(bytes(result))
+
+
+def _unified_patch_paths(patch, repo, git_apply):
+    listing = subprocess.run([*git_apply, '--numstat', '-z', '-'], input=patch, capture_output=True)
+    if listing.returncode:
+        raise ValueError(listing.stderr.decode('utf-8', 'replace'))
+    paths = []
+    for row in listing.stdout.split(b'\0'):
+        if row:
+            fields = row.split(b'\t', 2)
+            if len(fields) != 3 or not fields[2]:
+                raise ValueError('Unrecognized patch file listing')
+            paths.append(patch_path(repo, os.fsdecode(fields[2]))[0])
+    # Numstat names the destination for a rename/copy; protect its source too.
+    for line in patch.decode('utf-8').splitlines():
+        for prefix in ('rename from ', 'rename to ', 'copy from ', 'copy to '):
+            if line.startswith(prefix):
+                paths.append(patch_path(repo, _git_path(line[len(prefix):]))[0])
+                break
+    if patch and not paths:
+        raise ValueError('Patch has no managed file paths')
+    return paths
 
 
 def sha(data):
@@ -140,16 +200,30 @@ def apply_patch(request):
         if repo.resolve() != repo or not repo.is_dir():
             raise ValueError('Prepared edit root changed or is unavailable')
     else:
-        # Git apply also operates on ordinary directories, without git init.
-        # Preserve repository-relative paths for existing unified/context calls.
-        try:
-            top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True)
-        except FileNotFoundError:
+        # Text patches are relative to the selected cwd, including Git subdirs.
+        # --work-tree avoids Git silently ignoring cwd-relative paths there.
+        if shutil.which('git') is None:
             return {'error': 'git_unavailable',
                     'message': 'Patch text needs the Git executable, not a repository; use read_file(for_edit=true) and edits for Git-free editing'}
-        repo = Path(os.fsdecode(top.stdout).strip()) if top.returncode == 0 else Path.cwd()
+        repo = Path.cwd().resolve()
     os.chdir(repo)
-    with lock(repo / ".remote-workbench-patch"):
+    git_apply = ['git', '--work-tree=' + str(repo), 'apply']
+    guards = request.get('expected_files')
+    if guards is not None and (not isinstance(guards, dict) or not 1 <= len(guards) <= 100):
+        raise ValueError('Invalid prepared edit guards')
+    native = request['patch'].startswith('*** Begin Patch')
+    if prepared is not None:
+        if not guards:
+            raise ValueError('Prepared edits require file guards')
+        paths = [patch_path(repo, name)[0] for name in guards]
+    elif native:
+        paths = native_patch_paths(request['patch'], repo)
+    else:
+        try:
+            paths = _unified_patch_paths(patch, repo, git_apply) if patch else []
+        except ValueError as exc:
+            return {'error': 'patch_conflict', 'message': str(exc)}
+    with lock(paths) as locked_fds:
         expected_repo = request.get('expected_repository')
         if expected_repo is not None and str(repo) != expected_repo:
             return {'error': 'edit_target_mismatch', 'message': 'Prepared edit belongs to another edit root'}
@@ -189,7 +263,6 @@ def apply_patch(request):
         if not patch:
             return {'success': True, 'check_only': bool(request.get('check_only')),
                     'summary': '', 'patch_sha256': sha(patch), 'changed': False}
-        native = request["patch"].startswith("*** Begin Patch")
         if native:
             patch = compile_native_patch(request["patch"], repo, request.get("max_file_size", 10485760)).encode("utf-8")
             if not patch:
@@ -222,13 +295,16 @@ def apply_patch(request):
         else:
             # Git's normal path/context protections apply in both worktrees and
             # plain directories. No index, repository creation or project scan.
-            check = subprocess.run(["git", "apply", "--check", "--whitespace=nowarn", "-"], input=patch, capture_output=True)
+            # Git can still be writing if its Python parent exits. Inherit the
+            # lock descriptors so the actual mutator keeps exclusion until exit.
+            child_options = {'input': patch, 'capture_output': True, 'pass_fds': locked_fds}
+            check = subprocess.run([*git_apply, "--check", "--whitespace=nowarn", "-"], **child_options)
             if check.returncode:
                 return {"error": "patch_conflict", "message": check.stderr.decode("utf-8", "replace")}
-            summary = subprocess.run(["git", "apply", "--numstat", "-"], input=patch, capture_output=True, check=True)
+            summary = subprocess.run([*git_apply, "--numstat", "-"], check=True, **child_options)
             summary_text = summary.stdout.decode('utf-8', 'replace')
             if not request.get('check_only'):
-                result = subprocess.run(["git", "apply", "--whitespace=nowarn", "-"], input=patch, capture_output=True)
+                result = subprocess.run([*git_apply, "--whitespace=nowarn", "-"], **child_options)
                 if result.returncode:
                     return {"error": "apply_failed", "message": result.stderr.decode("utf-8", "replace")}
         result = {"success": True, "check_only": bool(request.get("check_only")), "summary": summary_text,
@@ -319,6 +395,32 @@ def read_lines(request):
         result.update(_edit_data_base64=base64.b64encode(snapshot).decode('ascii'),
                       _edit_path=str(path), _edit_repository=str(edit_root))
     return result
+
+
+def read_selected(request):
+    """One bounded, explicit selection; never discover or scan a project."""
+    selection = request.get('files')
+    if (not isinstance(selection, list) or not 1 <= len(selection) <= 16
+            or any(not isinstance(item, dict) or not isinstance(item.get('path'), str)
+                   or not item['path'] or '\x00' in item['path']
+                   or type(item.get('for_edit')) is not bool for item in selection)):
+        raise ValueError('Select 1..16 explicit files')
+    results, used = [], 0
+    snapshot_budget = 4 * ((2 * request.get('max_file_size', 10485760) + 2) // 3)
+    for item in selection:
+        try:
+            if '.remote-workbench-sessions' in Path(os.path.abspath(item['path'])).parts:
+                raise ValueError('Select files from the actual directory, not a managed project copy')
+            value = read_lines(dict(request, path=item['path'], for_edit=item['for_edit']))
+            size = len(value.get('_edit_data_base64', ''))
+            if used + size > snapshot_budget:
+                value = {'error': 'snapshot_batch_budget', 'message': 'Read this file individually; selected snapshots exceed the batch budget'}
+            else:
+                used += size
+        except (OSError, ValueError, UnicodeError) as exc:
+            value = {'error': 'read_failed', 'message': str(exc)[:512]}
+        results.append(value)
+    return {'files': results}
 
 
 
@@ -476,6 +578,8 @@ def main():
             result = job(request)
         elif request["op"] == "apply_patch":
             result = apply_patch(request)
+        elif request["op"] == "read_selected":
+            result = read_selected(request)
         elif request["op"] == "read_lines":
             result = read_lines(request)
         elif request["op"] == "read_binary":

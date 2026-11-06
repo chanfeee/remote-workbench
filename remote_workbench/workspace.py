@@ -89,7 +89,7 @@ class Workspace:
 # every model-facing schema. Original tool validation/audit code remains shared.
 TOOLS = [
     ("exec_command", commands.ssh_run, "Execute shell text or an argv array in the remote workspace. Prefer arrays for literal arguments (no shell interpolation); strings support pipes/activation. Fresh account login shell each call; max_bytes bounds output."),
-    ("read_file", files.ssh_read_file, "Read numbered UTF-8 lines. for_edit=true returns edit_id/local_path from one complete file snapshot for guarded edits. offset is zero-based; limit/max_bytes bound the preview."),
+    ("read_file", files.ssh_read_file, "Read numbered UTF-8 lines from one path or up to 16 explicit paths in one SSH request. for_edit=true returns per-file edit_ids. offset/limit/max_bytes bound each preview."),
     ("fetch_image", files.ssh_fetch_image, "Fetch a remote PNG/JPG/PDF/SVG to a private local cache. PDF page is 1-based. Show returned image_markdown in chat; paths and metadata only, no base64. PDF/SVG previews require the local images extra."),
     ("write_file", files.ssh_write_file, "Atomically write remote UTF-8 content. Optional expected_sha256 rejects stale edits."),
     ("patch_file", files.ssh_patch_file, "Apply unique old/new replacements, or sequential edits=[{old,new}], remotely. Optional expected_sha256 and check_only; returns this edit's diff."),
@@ -134,27 +134,14 @@ def bind_tool(workspace: Workspace, name: str, function, description: str, *, wo
             arguments["cwd"] = active_workspace.resolve_cwd(arguments.get("cwd"))
         token = workspace_executor.set((active_workspace.host, active_workspace.executor))
         try:
-            claims = session.resources if session is not None else None
-            if claims is not None and name == 'apply_patch' and arguments.get('edits'):
+            if session is not None and name == 'apply_patch' and arguments.get('edits'):
                 from remote_workbench.edit_spec import prepared_edits
                 if prepared_edits(arguments['edits']):
                     from remote_workbench.prepared_edit import normalize
                     normalize(arguments, active_workspace.executor)
-            claim = None
-            if claims is not None and name in {'exec_command', 'start_job', 'write_file', 'patch_file', 'apply_patch'} and not arguments.get('check_only'):
-                declared = active_workspace.resolve_cwd(arguments.get('cwd'))
-                root = posixpath.commonpath([active_workspace.cwd, declared])
-                if isinstance(arguments.get('path'), str):
-                    root = posixpath.commonpath([root, posixpath.dirname(posixpath.normpath(posixpath.join(declared, arguments['path'])))])
-                if name == 'apply_patch' and arguments.get('expected_files'):
-                    root = posixpath.commonpath([root, *[posixpath.dirname(p) for p in arguments['expected_files']]])
-                claim = claims.acquire(active_workspace.executor.config.ssh_target, root, session.id, name)
-            result = await function(**arguments)
-            if claim:
-                claims.finish(claim, result, background=name == 'start_job', shell=name == 'exec_command')
-            elif claims is not None and name in {'job_status', 'job_wait', 'stop_job'}:
-                claims.reconcile(session.id, arguments['job_id'], result)
-            return result
+            from remote_workbench.resource_claims import submission
+            with submission() if session is not None else nullcontext():
+                return await function(**arguments)
         finally:
             workspace_executor.reset(token)
 
@@ -293,7 +280,7 @@ def create_server(workspace: Workspace, *, viewer_url: str | None = None, sessio
 
     for name, function, description in TOOLS:
         default_max_bytes = {
-            "exec_command": 2048,
+            "exec_command": 16384,
             "read_file": 4096,
             "patch_file": 4096,
             "git_diff": 4096,
@@ -354,18 +341,12 @@ def _local_audit_viewer(port: int | None, *, audit_dir=None, handler=None):
 def main():
     parser = argparse.ArgumentParser(description="Local Remote Workbench MCP bound to one remote workspace")
     parser.add_argument("--workspace", required=True, help="Local workspace JSON manifest")
-    parser.add_argument("--viewer-port", type=int, default=0,
-                        help="Local viewer port (default 0: OS-assigned); if occupied, use an available port")
+    parser.add_argument('--viewer-port', type=int, default=None, help=argparse.SUPPRESS)
     args = parser.parse_args()
     workspace = Workspace.load(args.workspace)
     from remote_workbench.workspace_session import WorkspaceSession
     session = WorkspaceSession(workspace)
-    with _local_audit_viewer(args.viewer_port, audit_dir=session.audit_dir) as viewer:
-        viewer_url = None
-        if viewer is not None:
-            viewer_url = viewer.viewer_url + "/"
-            print(f"Local audit viewer: {viewer_url}", file=sys.stderr, flush=True)
-        create_server(workspace, viewer_url=viewer_url, session=session).run()
+    create_server(workspace, session=session).run()
 
 
 if __name__ == "__main__":

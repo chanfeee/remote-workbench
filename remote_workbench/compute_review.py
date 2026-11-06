@@ -49,12 +49,15 @@ def compute_risks(command, threshold=8):
         if not words:
             continue
         program = os.path.basename(words[0])
-        if program.startswith("python") and "-m" in words:
+        if (program.startswith("python") and "-m" in words and
+                ("-c" not in words or words.index("-m") < words.index("-c"))):
             module_index = words.index("-m") + 1
             if module_index < len(words):
                 words = [words[module_index], *words[module_index + 1:]]
                 program = words[0]
-        if set(words[1:]) & {"--help", "--version", "-h"}:
+        # A flag passed to a workload/script is not the launcher's own query:
+        # python -c CODE --help still executes CODE; mpirun app --help runs app.
+        if len(words) == 2 and words[1] in {"--help", "--version", "-h"}:
             continue
         if program in {"mpirun", "mpiexec", "srun", "sbatch", "qsub", "bsub", "condor_submit", "parallel", "torchrun"}:
             risks.append(program + " launches or submits a compute workload")

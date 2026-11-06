@@ -23,4 +23,4 @@ async def test_probe_exposes_no_execution_and_records_only_identity_fields(tmp_p
         assert result["remote_execution"] is False
         record = (tmp_path / result["operation_id"] / "record.json").read_text()
         assert "must-not-log" not in record and "must-not-log" not in blocks[0].text
-        assert result["operation_log"].endswith(f"?id={result['operation_id']})")
+        assert 'operation_log' not in result

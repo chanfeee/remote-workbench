@@ -19,9 +19,6 @@ class WorkspaceSession:
         self.source = template
         self.audit_dir = audit.base_root() / "sessions" / self.id
         self.audit_dir.mkdir(mode=0o700, parents=True, exist_ok=False)
-        from remote_workbench.resource_claims import ResourceClaims
-        self.resources = ResourceClaims(audit.base_root() / 'workspace-resources',
-                                         audit_root=audit.base_root() / 'sessions')
         self.project_root = template.cwd
         config = replace(template.executor.config, default_cwd=template.cwd)
         self.workspace = replace(template, executor=SSHExecutor(config))

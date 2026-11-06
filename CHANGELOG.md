@@ -1,11 +1,32 @@
 # Changelog
 
-## Unreleased
+## 0.4.2 — file coordination and inline records
 
+- Keep unknown completion/cleanup, pending cancellation, running, timeout and refused execution distinct from a zero exit in inline cards. Preserve uncertain edit facts and skip attached checks/reads; confirmed-success reply text stays unchanged. Advance the card resource to v4 to avoid stale templates.
+- Limit help/version compute-review exemptions to standalone information queries; workload arguments cannot suppress parallel-launcher or Python worker-count detection.
+- Replace directory reservations with remote per-file locks for managed edits. Share directories freely, keep commands/background jobs out of write reservations, retain job idempotency/recovery independently, and leave historical directory claims untouched. Apply text patches relative to the selected cwd, including Git subdirectories.
+- Reuse liteRemote's activity and file-review frontend directly. Remove explanatory footers, visible record IDs, repeated command labels and empty groups while retaining concise failure/unknown/truncation states and read-only output paging.
+- Show command facts and managed file changes in read-only MCP Apps cards, with grouped commands, bounded stdout/stderr, per-file counts and expandable colored diffs. Keep UI previews in result metadata and retain the eight-tool interface.
+- Stop standalone HTML viewers in MCP entrypoints and remove browser links and web/audit console commands. Preserve local records and add `remote-workbench records` for independent metadata and output-page queries. Existing clients use the new behavior after an explicit installation update and MCP reload.
+- Require the metadata-capable MCP SDK 1.30.0 already resolved in the lockfile. Keep manual SSH authentication, execution supervision, edit conflict protection and original-job recovery unchanged.
+- Return explicitly selected files after confirmed command completion, including nonzero exits, so a failed check need not require another file-read call. Unknown, timed-out and refused execution still skips follow-up reads.
+- Support selected reads/edit snapshots after patch-followed checks, including formatter changes; retain per-file failures without replaying an applied patch or completed command.
+- Mark only source/saved-output/image reads as read-only MCP operations; retain normal approval boundaries for commands, edits, bindings and the mixed advanced gateway.
+- Allow `exec_command` to return explicitly selected files/edit references after confirmed completion. Preserve command results if optional reads fail, and skip reads after timed-out, refused or unknown execution.
+- Omit duplicate successful launch locations and null origin nonces from model-facing replies, retaining actual cwd, cleanup limits, uncertain outcomes and complete original records.
+- Shorten shared server instructions and keep call details in individual tool descriptions/schemas, reducing repeated discovery text without changing the eight-tool interface or execution protections.
+- Reuse the chat's binding when a command repeats the same host and canonical cwd. Target changes, aliases and explicit switches still validate the directory; command connection checks and fresh-shell behavior remain.
+- Preserve budgeted stdout/stderr alongside successful test summaries, including patch-followed checks, so reading execution facts does not require another log call. Complete local records and explicit truncation remain unchanged.
+- Bind an explicit host/absolute cwd in the first command, accept text stdin, and expose local-style patches/Add File directly. Keep snapshot edits optional and automatically retain command/input/output/managed-diff records without extra model calls for bookkeeping.
+- Use a 16 KiB default command preview and preserve complete local output; remove the compulsory first-bind-only and snapshot-ID/line-range workflow. This is an interface candidate, not an end-to-end latency or token-parity claim.
+
+- Prefer combined inspection/read and edit/check/review calls for known-path tasks, with recorded execution facts shown in the inline card. Reuse supplied schemas and edit references; retain additional calls for missing evidence, conflicts and failures instead of enforcing a request-count cap.
+- Read up to sixteen explicitly selected files in one MCP/SSH call, with separate bounded previews, edit snapshots, errors and audit records. Switch/check/read combinations also use one file-read request and retain the newly bound target's origin.
+- Launch the native workload shell without an extra Python exec process and wake the supervisor on completion instead of waiting for its control poll. Preserve login-shell startup, process-group ownership, cancellation, timeouts and output records.
 - Distinguish missing edit files, directories, symbolic links, noncanonical paths and protected Git metadata. Missing-file errors explain how to create a file without requesting a snapshot first.
 - Show readable worker failures in the audit viewer's main output, including existing records, while retaining the original protocol output in raw details and output retrieval.
 - Keep long paths and operation headings within their containers by allowing text wrapping and flex-item shrinking; allow section labels to wrap in narrow layouts.
-- Add an explicit local stable updater that builds a fixed Git commit, installs locked dependencies, verifies MCP and the viewer, and switches current only after success; retain prior installations and state.
+- Update the explicit local stable updater to verify the installed MCP inline resource and file-coordination capability, without requiring a standalone viewer. Build a fixed Git commit, install locked dependencies and switch current only after success; retain prior installations and state.
 
 ## 0.4.1 — workspace binding and deployment fixes
 

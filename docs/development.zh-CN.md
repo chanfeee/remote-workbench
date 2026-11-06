@@ -53,7 +53,7 @@ python3 scripts/update_local_stable.py
 
 默认安装本地 `stable` 分支，目标为仓库内 `.local/stable`。其他位置使用 `--install-root /absolute/stable`，也可用 `--ref` 明确选择已存在的提交或本地 ref。脚本不 fetch、不移动分支、不读取未提交源码；先更新本地 stable，再运行此命令。
 
-更新会归档确定提交，构建 wheel，按该提交的锁文件安装依赖，并验证独立安装的导入、MCP stdio 和本机查看器。只有验证成功才原子切换 `current`；配置和历史状态保留。重复安装同一提交仅复核现有安装，不重新构建。失败候选保留供检查，旧入口保持原样。`release.json` 保存来源 commit、wheel SHA256 和前一个安装位置，回滚时可将 `current` 重新指向该位置。
+更新会归档确定提交，构建 wheel，按该提交的锁文件安装依赖，并验证独立安装的导入、MCP stdio、内联资源和文件协调能力，不启动独立 HTML 查看器。只有验证成功才原子切换 `current`；配置和历史状态保留。重复安装同一提交仅复核现有安装，不重新构建。失败候选保留供检查，旧入口保持原样。`release.json` 保存来源 commit、wheel SHA256 和前一个安装位置，回滚时可将 `current` 重新指向该位置。
 
 这是本地部署便利入口，不会创建 tag 或 GitHub Release，也不改变正式发行流程。更新后仍需重载 MCP；脚本不会中断现有聊天或其任务。
 
@@ -68,11 +68,13 @@ args = []
 enabled = true
 ```
 
-启动器固定该安装的 Python，并明确传入对应 `--config`、`--data-dir` 和 `--viewer-port 0`。更换安装后重载客户端并核对实际版本；改变源码或 symlink 不会自动更新已运行进程。
+启动器固定该安装的 Python，并明确传入对应 `--config` 和 `--data-dir`；旧 `--viewer-port 0` 参数仍可解析，但不再启动服务。更换安装后重载客户端并核对实际版本；改变源码或 symlink 不会自动更新已运行进程。
+
+不同项目的 MCP 进程可能同时加载不同安装。项目内 `.codex/config.toml` 的候选入口也应在推广时检查，不能只重载开发项目。通过 `workspace_info` 核对 `runtime.version`、`runtime.package_path`、`runtime.data_dir` 和 `write_coordination`；`0.4.2` 的协调值为 `managed-files`。旧进程继续报目录占用时，应在对应项目重载其 MCP，不删除活动任务或历史占用记录来绕过问题。重载前先保存正在运行的前台工作；已有后台任务按原 job 身份恢复。
 
 新聊天默认本地，只有明确选择服务器/目录后 MCP 才执行远程任务。本地原生工具保持本地；复用人工建立的 ControlMaster，不处理密码或 OTP。开发与稳定安装分别保留状态，但不同聊天的任务依然按原始目标恢复，不因分支或安装渠道切换而重跑命令。
 
-操作记录页只读、按进程实例隔离、自动刷新；使用返回的新链接，不按固定端口猜地址。旧文档中的 copy/session 原型与 a7 查看器交接是历史记录，保留于 [Session 原型](session-prototype.zh-CN.md)、[旧 Develop 交接](develop-handoff.zh-CN.md)；实际目录行为以所安装版本及[目录契约](workspace-mode-contract.zh-CN.md)为准。
+当前操作记录通过只读内联卡片和独立 CLI 查看，不依赖本机网页端口。旧文档中的 copy/session 原型与 a7 查看器交接是历史记录，保留于 [Session 原型](session-prototype.zh-CN.md)、[旧 Develop 交接](develop-handoff.zh-CN.md)；实际目录行为以所安装版本及[目录契约](workspace-mode-contract.zh-CN.md)为准。
 
 ## 发布内容边界
 

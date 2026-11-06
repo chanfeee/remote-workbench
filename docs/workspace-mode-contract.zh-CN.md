@@ -4,7 +4,7 @@
 
 ## 选择目录
 
-`remote-workbench-session` 的 `workspace_switch(host, cwd)`：
+`remote-workbench-session` 可用 `workspace_switch(host, cwd)` 绑定；本地候选也允许首个 `exec_command(host, cwd, command)` 在同一次调用中完成同样的显式绑定与执行。其目录规则一致：
 
 - 远端 `realpath` 规范化后直接使用该目录，不创建代码副本，不采集初始项目内容基线。只规范化目录并获取运行状态所需的 home，不探测 Git，也不扫描项目内容。
 - 不再接受 `directory_mode` 参数，不再提供 copy 模式或副本交付接口。
@@ -21,32 +21,25 @@
 
 固定工作区入口 `remote-workbench-workspace` 同样使用实际目录，记录按进程 session 分离，远端运行状态保存在用户状态目录的独立 session 位置。
 
-## 第一版目录协调
+## 文件级写入协调（2026-11-06，本地候选）
 
-适用：同一本地控制端、同一 data-dir、全部使用本轮更新版本的 session MCP、配置解析到同一 SSH endpoint 的 direct 目标。
+同一目录可以由多个聊天共享；不同文件允许并行修改。普通 shell、后台任务、读取、查询、日志和停止不申请目录占用，后台任务的未知终态也不再锁住整个目录。
 
-资源键使用 endpoint 与规范化的**选定目录**，不是 Git 仓库根：`/repo/a` 与 `/repo/b` 可并行；`/repo` 与 `/repo/a` 冲突。direct 受管修改、普通 shell 和后台启动按潜在写入处理；补丁 check-only 不占写入资源。多个聊天可以绑定同一目录，写入冲突时返回占用信息供轮流执行，不暗中换目录。
+受管文件写入、替换和补丁在远端按规范化后的实际文件路径加互斥锁，覆盖同一账号和同一锁命名空间下采用此协议的新版 worker。锁文件位于远端 `$HOME/.cache/remote-workbench-ssh/file-locks/`，不依赖聊天 target 或本地 data-dir，也不进入代码目录。同一文件等待前一受管编辑结束；同目录的其他文件不受阻。
 
-后台占用不在启动回复时释放。占用持久化到本地 `resources.sqlite3`，本地进程退出不代表远端停止。已采集并确认的终态允许后续操作回收占用；恢复入口及 job controls 可重新关联输出句柄，未知状态继续阻止重叠写入。文件内容哈希、补丁上下文检查和原子写入仍独立生效。
+多文件补丁按固定路径顺序获取全部文件锁，包含新增、删除和移动的来源与目的路径。取得锁后才读取旧内容、校验快照和编译原生补丁；内容守卫、上下文检查和单文件原子写入继续生效。锁仅覆盖本次编辑，补丁后的检查命令不继续持锁。它不构成多文件事务。
 
-只读文件、目录、日志、任务查询及停止入口不申请写入占用。HTML 读取本地已有记录，不影响执行。
+文本补丁路径以显式 cwd 为基准；省略 cwd 时使用所选实际目录。在 Git 子目录中也不会自动改到 Git 根目录的同名文件。Git 仅作为补丁检查/应用程序使用，不创建仓库、不修改索引、不扫描整个工程。快照编辑仍使用其已保存的实际文件路径。
 
-边界：外部终端、多控制端、跨 endpoint 的 AFS 别名、独立 worktree 共享的 Git common-dir 尚不协调。不透明 shell 如果 `cd` 到另一个目录或写入绝对路径，无法由选定 cwd 推知全部影响；调用方应选择覆盖预期写入范围的目录。direct绑定和显式cwd拒绝受管副本路径，远端监督器也检查解析后的物理cwd。固定入口只在共享其审计根的同类进程间协调，不声称不同状态后端之间有统一锁。普通锁不构成操作系统沙箱。
+Git 子进程继承文件锁，避免 Python worker 先退出、Git 尚在写入时过早解锁。最后一个持有锁描述符的 worker/写入子进程结束后，锁由操作系统释放；空锁文件的存在不代表仍被占用。等待仍受原有文件操作超时及监督器取消约束，不以本地 PID、记录年龄或任务日志猜测远端状态。
 
-旧版 MCP 不理解本轮目录协调与副本退出规则，使用前应停止并重载所有共享该状态目录的 MCP 实例；不得混用旧进程。数据库不删除旧数据，但这不是旧程序可以接管新目标的保证。降级需要先停止相关控制端，并使用独立状态目录。
+边界：不拦截任意 shell、后台程序、外部终端或编辑器内部的文件写入；这些操作需要遵循项目并发约定。未提供跨服务器 AFS 别名识别、不同锁根之间的分布式协调或 Git common-dir 写锁，也不是操作系统沙箱。新旧 worker 的锁协议不同，应重载需要共同参与文件互斥的 MCP 进程；独立 stable 不随本地候选自动升级。
 
-## 未知占用与人工接管
+## 历史占用和人工接管
 
-优先使用原 job 的 `resolve_operation`、`job_status` / `job_wait`、`stop_job` 恢复并核验终态。占用信息包含 claim、workspace、job 和输出标识。
+旧 `resources.sqlite3` 与侧记原样保留，可用 `python -m remote_workbench.resource_claims --data-dir /absolute/local/state` 显式检查。新版默认执行不创建、查询或受其目录占用阻塞，也不自动清理这些历史记录。
 
-若原任务仍无法核实，保留占用。人工通过原服务器的终端确认相关任务已停止后，可用本地 CLI 解除：
-
-```sh
-python -m remote_workbench.resource_claims --data-dir /absolute/local/state
-python -m remote_workbench.resource_claims --data-dir /absolute/local/state --release CLAIM_ID --confirmed-stopped
-```
-
-此操作只移除本地协作占用，不发送信号、不删除远端内容，也不能证明进程树已清空。不要仅因 MCP 退出而解除未知占用。
+后台任务的身份、幂等预留、原始位置和输出句柄仍独立保存。`resolve_operation`、`job_status` / `job_wait`、`stop_job` 沿原任务查询、恢复或停止；终态未知仍如实返回 unknown，但不转化为目录占用，也不重跑原命令。
 
 ## 修改记录
 

@@ -11,11 +11,19 @@ from remote_workbench.server import mcp, require_connection
 
 
 @mcp.tool()
-async def ssh_read_file(path: str, offset: int = 0, limit: int = 160, host: str | None = None, max_bytes: int = 8192,
+async def ssh_read_file(path: str | list[str], offset: int = 0, limit: int = 160, host: str | None = None, max_bytes: int = 8192,
                         for_edit: bool = False, local_copy: bool = True) -> dict:
-    """Read numbered lines. for_edit caches this one complete file locally and returns edit_id/local_path for guarded edits; no project copy. offset is 0-based."""
+    """Read numbered lines from one path or up to 16 explicit paths in one SSH request. for_edit returns per-file edit_id snapshots; no project scan. offset is 0-based; max_bytes is per file."""
     if offset < 0 or not 1 <= limit <= 2000:
         raise ValueError("offset >= 0 and 1 <= limit <= 2000 required")
+    if isinstance(path, list):
+        if (not 1 <= len(path) <= 16
+                or any(not isinstance(p, str) or not p or '\x00' in p or p.startswith('~') for p in path)
+                or len(set(path)) != len(path)):
+            raise ValueError('Select 1..16 distinct explicit paths without NUL or ~')
+        executor = await require_connection(host)
+        return {'files': await read_selected(executor, [(p, for_edit) for p in path],
+            max_bytes=max_bytes, offset=offset, limit=limit, local_copy=local_copy)}
     executor = await require_connection(host)
     result = await remote_edit(executor, {"op": "read_lines", "path": path, "offset": offset, "limit": limit,
                                          "budget": max_bytes, "for_edit": for_edit}, max_bytes=max_bytes)
@@ -23,6 +31,48 @@ async def ssh_read_file(path: str, offset: int = 0, limit: int = 160, host: str 
         from remote_workbench.prepared_edit import save
         result = save(executor, result, local_copy=local_copy)
     return result
+
+
+async def read_selected(executor, selection, *, max_bytes=4096, offset=0, limit=160, local_copy=False, cwd=None):
+    """Internal bind/read combination; one SSH request, separate local records."""
+    from remote_workbench import audit
+    from remote_workbench.prepared_edit import save
+    from remote_workbench.tool_interface import present_result
+    connected, message = await executor.check_connection()
+    if not connected:
+        raise ValueError(message)
+    options = {'max_bytes': max_bytes}
+    if cwd is not None:
+        options['cwd'] = cwd
+    response = await remote_edit(executor, {'op': 'read_selected',
+        'files': [{'path':path, 'for_edit':for_edit} for path, for_edit in selection],
+        'offset':offset, 'limit':limit, 'budget':max_bytes}, **options)
+    values = response.get('files')
+    if not isinstance(values, list) or len(values) != len(selection):
+        return [dict(response, error=response.get('error', 'invalid_read_batch'), requested_path=path)
+                for path, _ in selection]
+    results = []
+    for (path, for_edit), value in zip(selection, values):
+        if not isinstance(value, dict):
+            value = {'error': 'invalid_read_result'}
+        record = audit.create(kind='tool', tool='ssh_read_file', parent_id=audit.operation_id.get(),
+            host=executor.config.ssh_target, cwd=cwd if cwd is not None else executor.config.default_cwd,
+            arguments={'path':path, 'for_edit':for_edit}, source_output_id=response.get('output_id'),
+            status='failed' if value.get('error') else 'finished')
+        audit.add_child(audit.operation_id.get(), record)
+        value = dict(value, output_id=record)
+        try:
+            if for_edit and not value.get('error'):
+                value = save(executor, value, local_copy=local_copy)
+        except (OSError, ValueError, KeyError) as exc:
+            value = {'error':'read_failed', 'message':str(exc)[:512], 'output_id':record}
+        audit.update(record, status='failed' if value.get('error') else 'finished',
+                     error=value.get('error'), snapshot_available=bool(value.get('edit_id')))
+        with audit.open_stream(record, 'stdout') as output:
+            display = (value.get('message') or value['error']) if value.get('error') else value.get('content', '')
+            output.write(display.encode('utf-8'))
+        results.append(dict(present_result('read_file', value, {'path':path}), requested_path=path))
+    return results
 
 
 @mcp.tool()

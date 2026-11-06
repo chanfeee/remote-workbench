@@ -31,7 +31,8 @@ const tools = new Proxy({}, {get: () => async args => {
 }});
 (async () => {
     try {
-        await new AsyncFunction("tools", "text", source)(tools, v => { returned = v; texts.push(v); });
+        await new AsyncFunction("tools", "text", "atob", "TextEncoder", source)(
+            tools, v => { returned = v; texts.push(v); }, undefined, undefined);
         process.stdout.write(JSON.stringify({calls, returned, ...(input.capture_texts ? {texts} : {})}));
     } catch (error) {
         process.stdout.write(JSON.stringify({calls, error: error.name}));
@@ -90,6 +91,14 @@ def test_generated_bridge_preserves_json_and_code_literals():
             {"path": "example.py", "old": [value], "new": [value + " changed"]}],
             "metadata": {"__proto__": {"literal": True}}}
         assert run_source(render_call('apply_patch', arguments))["calls"] == [arguments]
+
+
+def test_generated_calls_work_without_browser_encoding_globals():
+    from remote_workbench.call_source import render_call
+    for missing in ('atob', 'TextEncoder'):
+        assert run_source('new ' + missing + '()')["error"] == 'TypeError'
+    arguments = {'command': ['python3', '-c', 'print("中文 \\n ${literal}")']}
+    assert run_source(render_call('exec_command', arguments))["calls"] == [arguments]
 
 
 def test_bridge_rejects_code_in_tool_name():

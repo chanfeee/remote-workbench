@@ -30,16 +30,16 @@ async def test_default_direct_edits_source_without_copy(project):
 
 
 
-async def test_shared_direct_blocks_writer_but_allows_reads_and_sibling(project):
+async def test_shared_direct_ignores_legacy_directory_claims(project):
     router, server, source, other = project
     for thread in ("a", "b"):
         bound = await call(server, thread, "workspace_switch", host="a", cwd=str(source))
         assert bound["cwd"] == str(source.resolve())
     a = router.registry.get_or_create("a")
     claim = router.resources.acquire("host-a", str(source), a.workspace_id, "start_job")
-    with pytest.raises(ToolError, match="busy or completion unknown"):
-        await call(server, "b", "write_file", path="value.txt", content="blocked")
-    assert "original" in (await call(server, "b", "read_file", path="value.txt"))["content"]
+    assert (await call(server, "b", "write_file", path="value.txt", content="shared"))["success"]
+    assert "shared" in (await call(server, "b", "read_file", path="value.txt"))["content"]
+    assert [row['claim_id'] for row in router.resources.active()] == [claim]
     await call(server, "b", "workspace_switch", host="a", cwd=str(other))
     assert (await call(server, "b", "write_file", path="value.txt", content="sibling"))["success"]
     router.resources.finish(claim, {"executed":False})

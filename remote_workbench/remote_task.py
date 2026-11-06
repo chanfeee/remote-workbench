@@ -314,6 +314,16 @@ def supervise_task(settings):
     threads = []
     old_handlers = {}
     batch_count = None
+    # Wake on child completion instead of adding a polling interval to every
+    # short operation. Keep the leader unreaped until owned-group cleanup.
+    wake_read, wake_write = os.pipe()
+    os.set_blocking(wake_write, False)
+    def wake_parent(_number, _frame):
+        try:
+            os.write(wake_write, b'E')
+        except OSError:
+            pass
+    old_handlers[signal.SIGCHLD] = signal.signal(signal.SIGCHLD, wake_parent)
     for number in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         old_handlers[number] = signal.signal(number, lambda n, f: received_signal.append(n))
     deadline = time.monotonic() + timeout
@@ -342,28 +352,29 @@ def supervise_task(settings):
             spec = login_spec(command, settings["cwd"], preamble=settings.get("preamble", ""),
                               markers=settings.get("markers"), trace=settings.get("trace", False),
                               environment=settings.get("environment"))
-            # Real exec preserves the account shell; no preload/spawn hooks.
-            launcher = "import os\n"
-            if completion is not None:
-                launcher += "import signal\nsignal.signal(signal.SIGTERM, signal.SIG_DFL)\nsignal.signal(signal.SIGHUP, signal.SIG_DFL)\nsignal.signal(signal.SIGINT, signal.SIG_DFL)\n"
-            launcher += "os.execvpe(" + repr(spec["shell"]) + ", " + repr(spec["argv"]) + ", dict(os.environ, **" + repr(spec["env_updates"]) + "))\n"
-            if completion is not None:
-                # Older macOS Python lacks waitid/WNOWAIT. A tiny group leader
-                # remains alive after the real command exits, reserving PGID
-                # until our final KILL. It does not intercept spawn APIs.
-                guardian = "import os,signal,subprocess,sys,time\n"
+            streams = {name: subprocess.PIPE for name in ("stdout", "stderr")} if not foreground else {}
+            child_environment = dict(os.environ, **spec["env_updates"])
+            if completion is None:
+                # Popen's explicit executable preserves login argv[0] directly;
+                # an intermediate Python exec launcher adds no supervision.
+                process = subprocess.Popen(spec["argv"], executable=spec["shell"], env=child_environment,
+                                           stdin=input_file, start_new_session=True, **streams)
+            else:
+                # macOS without waitid/WNOWAIT still needs a live group leader.
+                # Only this fixed guardian receives the notification descriptor;
+                # the actual workload closes it and retains its native shell.
+                guardian = "import os,signal,sys,time\n"
                 guardian += "for n in (signal.SIGTERM,signal.SIGHUP,signal.SIGINT): signal.signal(n,signal.SIG_IGN)\n"
-                guardian += "try:\n p=subprocess.Popen([sys.executable,'-c'," + repr(launcher) + "])\n"
-                guardian += " with open(" + repr(str(root / "workload_pid.tmp")) + ",'w') as f: f.write(str(p.pid))\n"
-                guardian += " os.replace(" + repr(str(root / "workload_pid.tmp")) + "," + repr(str(root / "workload_pid")) + ")\n code=p.wait()\n"
+                guardian += "try:\n pid=os.posix_spawn(" + repr(spec["shell"]) + "," + repr(spec["argv"]) + ",os.environ,setsigdef=(signal.SIGTERM,signal.SIGHUP,signal.SIGINT),file_actions=[(os.POSIX_SPAWN_CLOSE," + repr(wake_write) + ")])\n"
+                guardian += " with open(" + repr(str(root / "workload_pid.tmp")) + ",'w') as f: f.write(str(pid))\n"
+                guardian += " os.replace(" + repr(str(root / "workload_pid.tmp")) + "," + repr(str(root / "workload_pid")) + ")\n code=os.waitstatus_to_exitcode(os.waitpid(pid,0)[1])\n"
                 guardian += "except OSError as exc:\n print(str(exc),file=sys.stderr,flush=True)\n code=127\n"
                 guardian += "with open(" + repr(str(completion) + ".tmp") + ",'w') as f: f.write(str(code))\n"
                 guardian += "os.replace(" + repr(str(completion) + ".tmp") + "," + repr(str(completion)) + ")\n"
+                guardian += "os.write(" + repr(wake_write) + ",b'E')\n"
                 guardian += "while True: time.sleep(3600)\n"
-                launcher = guardian
-            streams = {name: subprocess.PIPE for name in ("stdout", "stderr")} if not foreground else {}
-            process = subprocess.Popen([sys.executable, "-c", launcher], stdin=input_file,
-                                       start_new_session=True, **streams)
+                process = subprocess.Popen([sys.executable, "-c", guardian], stdin=input_file,
+                                           start_new_session=True, env=child_environment, pass_fds=(wake_write,), **streams)
         if not foreground:
             for name in ("stdout", "stderr"):
                 thread = threading.Thread(target=forward_task_output,
@@ -403,7 +414,10 @@ def supervise_task(settings):
                     break
             if child_exited(process, completion):
                 break
-            time.sleep(0.05)
+            watched = [wake_read, 0] if foreground else [wake_read]
+            ready, _, _ = select.select(watched, [], [], 0.05)
+            if wake_read in ready:
+                os.read(wake_read, 4096)
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         reason = "launch_failed"
         print(str(exc), file=sys.stderr, flush=True)
@@ -423,6 +437,8 @@ def supervise_task(settings):
                            message="A descendant still holds an output pipe open")
         for number, handler in old_handlers.items():
             signal.signal(number, handler)
+        os.close(wake_read)
+        os.close(wake_write)
         if reason == "timeout":
             code = 124
         elif reason in {"cancelled", "controller_disconnected", "controller_lease_expired", "supervisor_signal"}:

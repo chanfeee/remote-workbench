@@ -1,12 +1,12 @@
 [project]
 name = "remote-workbench"
-version = "0.4.1"
+version = "0.4.2"
 description = "Local MCP control for remote SSH workspaces with bounded output and readable audit diffs"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
 dependencies = [
-    "mcp[cli]>=1.2.0,<2",  # 2.0 removed mcp.server.fastmcp
+    "mcp[cli]>=1.30.0,<2",  # MCP Apps metadata; 2.0 removed mcp.server.fastmcp
     "pyyaml>=6.0",
     "fastapi>=0.115",
     "websockets>=12.0",
@@ -32,8 +32,6 @@ images = [
 remote-workbench = "remote_workbench.cli:main"
 remote-workbench-ssh = "remote_workbench.__main__:main"
 remote-workbench-setup = "remote_workbench.setup:main"
-remote-workbench-web = "remote_workbench.web.__main__:main"
-remote-workbench-audit = "remote_workbench.audit_web:main"
 remote-workbench-workspace = "remote_workbench.workspace:main"
 remote-workbench-session = "remote_workbench.session_server:main"
 remote-workbench-cleanup = "remote_workbench.cleanup:main"
@@ -44,7 +42,7 @@ artifacts = ["remote_workbench/scripts/*.sh"]
 
 [tool.hatch.build.targets.sdist]
 # Defense in depth: Git tracking or a broad docs include must not ship local reports.
-exclude = ["/docs/reports", "/.local", "/.codex"]
+exclude = ["/docs/reports", "/.local", "/.codex", "/devtools", "/tests/test_dev_timing.py"]
 include = [
     "/remote_workbench",
     "/tests",

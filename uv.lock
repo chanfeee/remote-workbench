@@ -1022,7 +1022,7 @@ wheels = [
 
 [[package]]
 name = "remote-workbench"
-version = "0.4.1"
+version = "0.4.2"
 source = { editable = "." }
 dependencies = [
     { name = "asyncssh" },
@@ -1048,7 +1048,7 @@ images = [
 requires-dist = [
     { name = "asyncssh", specifier = ">=2.14" },
     { name = "fastapi", specifier = ">=0.115" },
-    { name = "mcp", extras = ["cli"], specifier = ">=1.2.0,<2" },
+    { name = "mcp", extras = ["cli"], specifier = ">=1.30.0,<2" },
     { name = "pillow", marker = "extra == 'images'", specifier = ">=10,<13" },
     { name = "pypdfium2", marker = "extra == 'images'", specifier = ">=4,<6" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },

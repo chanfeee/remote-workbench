@@ -1,5 +1,7 @@
 # Upstream provenance
 
+The inline operation cards reuse the user-provided liteRemote activity/review frontend styles and renderers, distributed with the same GNU AGPL version 3 license. Adaptations scope the two views, connect the existing result/read-only pagination bridge, adjust branding, and remove explanatory footers, visible history IDs, duplicate command descriptions and empty groups. Execution and audit interfaces remain Remote Workbench's own; liteRemote's alternative execution backend is not incorporated.
+
 Remote Workbench is an independently maintained derivative of [Onirika](https://github.com/xinyue-uoft/Onirika). Its source baseline is Onirika version 0.1.0 at upstream commit `1e297c353891eb9e1e9881ffa9db5cb08a877c55`.
 
 The Remote Workbench changes in this source tree were made on 2026-10-23 and 2026-10-24. They include local command and output auditing, bounded MCP responses, remote file and patch operations, a local audit viewer, an immutable remote-workspace MCP entry point, shared remote account-shell selection for commands and jobs, and per-session project copies with isolated records and operation links. The project has been renamed and uses the `remote_workbench` Python package and `remote-workbench` command namespace. It is not an official Onirika release and is not represented as endorsed by the upstream maintainers.

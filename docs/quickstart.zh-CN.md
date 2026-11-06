@@ -81,7 +81,7 @@ uv run remote-workbench establish dev --config ~/.config/remote-workbench/config
 
 ## 6. 查看命令、输出与 diff
 
-工具返回加粗的 **Remote Workbench 操作记录** 链接；打开它查看完整命令、输出和改动。查看页默认使用系统分配的本机端口及本次进程专属地址，因此可与其他项目的 HTML 服务并行。若手动指定的首选端口正被占用，Remote Workbench 会另选空闲端口，不会接管已有页面。MCP 重启后请用新工具结果中的链接；旧链接会失效。后台日志由本地采集器保存，`job_wait` 等待增量，`search_output` 定位错误；完整记录保留在本地，模型按需读取有限片段。
+未发布版本使用 App 内联卡片展示命令与受管改动，不再启动独立 HTML 服务或返回网页链接。完整记录保留在本地；`read_output` 分页读取，`job_wait` 等待后台日志增量，`search_output` 定位错误。App 关闭后可用 `remote-workbench records --data-dir STATE_DIR --workspace-id WORKSPACE_ID` 独立查询，增加 `--id OUTPUT_ID --stream stdout` 查看输出。不支持内联的客户端仍可读取普通工具结果与本地记录。
 
 同一 threadId 可在进程重启后恢复绑定；新聊天独立。聊天记录独立与目录协调是工作流保护，不是操作系统权限沙箱。合并 MCP 条目不会删除旧日志、旧安装或远端副本。
 

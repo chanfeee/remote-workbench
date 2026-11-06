@@ -48,7 +48,7 @@ async def test_public_schemas_have_no_host_and_optional_cwd(tmp_path):
     assert all(tool.outputSchema is None for tool in tools)
     assert "cwd" not in schemas["apply_patch"].get("required", [])
     assert schemas["exec_command"]["properties"]["cwd"]["default"] == "."
-    assert schemas["exec_command"]["properties"]["max_bytes"]["default"] == 2048
+    assert schemas["exec_command"]["properties"]["max_bytes"]["default"] == 16384
     assert schemas["read_file"]["properties"]["max_bytes"]["default"] == 4096
     assert schemas["patch_file"]["properties"]["max_bytes"]["default"] == 4096
     assert schemas["git_diff"]["properties"]["max_bytes"]["default"] == 4096

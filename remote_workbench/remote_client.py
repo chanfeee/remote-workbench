@@ -56,6 +56,14 @@ async def edit(executor, payload, cwd=None, max_bytes=8192, timeout=None):
         value, _ = json.JSONDecoder().raw_decode(data[position:].decode("utf-8"))
     except ValueError:
         return {"error": "invalid_worker_output", "message": result.stdout, "output_id": result.output_id}
+    if payload.get('op') in {'write', 'append', 'replace', 'lines', 'apply_patch'}:
+        # A valid worker reply can prove that an edit happened without proving
+        # supervisor completion/cleanup. Preserve that distinction without
+        # adding fields to ordinary confirmed-success replies.
+        if result.execution_state != 'finished':
+            value['execution_state'] = result.execution_state or 'unknown'
+        if result.timed_out:
+            value['timed_out'] = True
     audit.update(result.output_id, worker_op=payload.get("op"))
     if payload.get("op") == "apply_patch":
         # The human viewer can display the submitted patch directly from disk;
