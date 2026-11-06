@@ -9,12 +9,16 @@
 ```sh
 git clone --branch main https://github.com/chanfeee/remote-workbench.git "$HOME/opt/remote-workbench/dev"
 cd "$HOME/opt/remote-workbench/dev"
-uv sync --frozen --extra dev --extra images
+uv sync --frozen --all-extras
 ```
 
 功能开发从 main 创建短分支，完成测试后向 main 提 PR。现有 develop 分支和未提交工作不自动重置、删除或搬移；先完成审阅与迁移，再切换日常开发 checkout。旧 `.local/develop/` 是安装目录名称，可以保留，不代表今后还维护另一条长期开发主线。
 
 Node 仅用于开发测试，无 npm 依赖；MCP 和远端运行继续使用 Python。开发安装可 editable，配置、状态和审计应独立于稳定安装。
+
+共享操作的审计与执行器选择位于 `tool_runtime.py`，工具函数不注册 MCP。旧 SSH 入口在 `server.py` 中显式注册；固定工作区与 session 直接复用这些函数。`session_server.py` 负责身份、绑定和工具 schema，`session_operations.py` 负责执行、编辑后续检查和作业提交。新增能力应沿用这些边界，避免从共享操作反向导入服务入口。
+
+默认安装只含 SSH MCP 与内联卡片所需依赖。`proxy` 和 `web` 分别用于代理网关和独立 Web/PTY 启动器；上面的 `--all-extras` 为完整本地回归安装全部可选依赖。离线费用与旧测试证据工具保存在 `scripts/offline/`，随源码包提供，不进入运行时 wheel。
 
 ## 稳定安装
 

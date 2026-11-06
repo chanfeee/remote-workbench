@@ -5,6 +5,7 @@ job. A second MCP process switches to B, then recovers A's same job and output
 handle. The shim never invokes a real SSH client or server.
 """
 from __future__ import annotations
+from scripts.offline.evidence_registry import EvidenceRegistry
 
 import asyncio
 import json
@@ -331,21 +332,21 @@ def _seed_legacy_rows(db_path: Path, binding: dict) -> None:
         binding["target_id"], binding["workspace_id"], binding["host"],
         binding["source_cwd"], binding["cwd"], binding["project_root"],
     )
-    attempt = registry.begin_test_attempt(
+    attempt = EvidenceRegistry(registry.path).begin_test_attempt(
         binding["workspace_id"], target, attempt_id="b" * 32,
         job_id="legacy-stdio-attempt", command="python3 -m unittest -v",
         cwd=binding["cwd"], execution_kind="foreground", started_at=123.0,
         before={"code": {"complete": True, "digest": "seed-before"}},
         revision=binding["revision"],
     )
-    registry.update_test_attempt(
+    EvidenceRegistry(registry.path).update_test_attempt(
         binding["workspace_id"], attempt["attempt_id"], state="finished",
         process_exit_status="success", exit_code=0, test_result="success",
         summary={"tests_run": 1, "passed": 1},
         after={"code": {"complete": True, "digest": "seed-after"}},
         finished_at=124.0,
     )
-    registry.save_test(binding["workspace_id"], binding["target_id"], {
+    EvidenceRegistry(registry.path).save_test(binding["workspace_id"], binding["target_id"], {
         "attempt_id": attempt["attempt_id"],
         "attempt_order": attempt["attempt_order"],
         "status": "legacy-success-marker",

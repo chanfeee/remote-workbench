@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from remote_workbench import audit
 
-from remote_workbench.server import mcp, require_connection
+from remote_workbench.tool_runtime import audited_operation, require_connection
 
 
-@mcp.tool()
+@audited_operation
 async def ssh_git_status(
     cwd: str | None = None,
     host: str | None = None,
@@ -119,7 +119,7 @@ def diff_page(output_id: str, cursor: int, max_bytes: int) -> dict:
             "next_cursor": next_cursor, "truncated": next_cursor < size, "total_bytes": size, "empty": size == 0}
 
 
-@mcp.tool()
+@audited_operation
 async def ssh_git_diff(cwd: str | None = None, ref: str = "", path: str = "", staged: bool = False,
                        host: str | None = None, mode: str = "summary", paths: list[str] | None = None,
                        context: int = 3, max_bytes: int = 8192, output_id: str = "", cursor: int = 0) -> dict:
@@ -153,7 +153,7 @@ async def ssh_git_diff(cwd: str | None = None, ref: str = "", path: str = "", st
             "empty": not result.stdout.strip(), "untracked_included": False}
 
 
-@mcp.tool()
+@audited_operation
 async def ssh_git_log(
     cwd: str | None = None,
     count: int = 10,

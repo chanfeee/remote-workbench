@@ -1,4 +1,5 @@
 """Legacy D3 rows remain untouched by ordinary background job collection."""
+from scripts.offline.evidence_registry import EvidenceRegistry
 import asyncio
 import json
 import uuid
@@ -7,7 +8,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from remote_workbench import audit, background_test_evidence, job_collector
+from remote_workbench import audit, job_collector
+from scripts.offline import background_test_evidence
 from remote_workbench.tools import commands
 from remote_workbench.workspace_registry import Registry, WorkspaceTarget
 
@@ -31,8 +33,8 @@ def seed_legacy_history(root, project, job_id):
         "command": "pytest -q", "operation_id": uuid.uuid4().hex,
         "status": "passed", "applies_to_current_code": True,
     }
-    registry.save_test(state.workspace_id, target.target_id, legacy_test)
-    attempt = registry.begin_test_attempt(
+    EvidenceRegistry(registry.path).save_test(state.workspace_id, target.target_id, legacy_test)
+    attempt = EvidenceRegistry(registry.path).begin_test_attempt(
         state.workspace_id, target, attempt_id=uuid.uuid4().hex, job_id=job_id,
         command="pytest -q", cwd=str(project), execution_kind="background",
         started_at=1.0, before={"code": {"digest": "legacy-only"}},

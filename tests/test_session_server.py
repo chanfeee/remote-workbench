@@ -1,3 +1,4 @@
+from scripts.offline.evidence_registry import EvidenceRegistry
 import asyncio
 from pathlib import Path
 import json
@@ -12,7 +13,7 @@ from mcp.server.lowlevel.server import request_ctx
 from mcp.shared.context import RequestContext
 
 from remote_workbench import audit, job_collector
-from remote_workbench import test_evidence
+from scripts.offline import test_evidence
 from remote_workbench import session_server as session_server_module
 from remote_workbench.config import HostConfig, ServerConfig
 from remote_workbench.server import require_connection, get_executor, workspace_executor
@@ -238,7 +239,7 @@ async def test_workspace_resume_bounds_and_pages_local_recovery_details(project,
             kind="tool", tool="exec_command", host=state.host, cwd=state.cwd,
             status="finished", command="pytest",
         )
-    router.registry.save_test(workspace_id, state.target_id, {
+    EvidenceRegistry(router.registry.path).save_test(workspace_id, state.target_id, {
         "command": "pytest " + ("--verbose " * 2000),
         "operation_id": test_operation_id,
         "output_id": "pending-output",
@@ -304,11 +305,11 @@ async def test_default_lifecycle_never_manages_legacy_test_evidence(project, mon
     state = router.registry.get(switched["workspace_id"])
     target = WorkspaceTarget(state.target_id, state.workspace_id, state.host, state.source_cwd,
                              state.cwd, state.project_root)
-    router.registry.save_test(state.workspace_id, state.target_id, {
+    EvidenceRegistry(router.registry.path).save_test(state.workspace_id, state.target_id, {
         "command": "pytest -q", "operation_id": "d" * 32, "status": "passed",
         "applies_to_current_code": True, "before": {"code": {"digest": "legacy"}},
     })
-    old_attempt = router.registry.begin_test_attempt(
+    old_attempt = EvidenceRegistry(router.registry.path).begin_test_attempt(
         state.workspace_id, target, attempt_id="e" * 32, job_id="legacy-job",
         command="pytest -q", cwd=state.cwd, execution_kind="foreground",
         started_at=1.0, before={"code": {"digest": "legacy"}}, revision=state.revision,
@@ -324,7 +325,7 @@ async def test_default_lifecycle_never_manages_legacy_test_evidence(project, mon
     )
     with monkeypatch.context() as blocked:
         for method in legacy_methods:
-            blocked.setattr(router.registry, method, forbidden)
+            blocked.setattr(router.registry, method, forbidden, raising=False)
         for method in ("capture", "capture_target", "compare", "invalidate"):
             blocked.setattr(test_evidence, method, forbidden)
         blocked.setattr(session_server_module.baseline, "project_fingerprint", forbidden)
@@ -392,14 +393,14 @@ async def test_writes_and_exec_leave_legacy_test_history_untouched(project, monk
     workspace_id, target_id = switched["workspace_id"], switched["target_id"]
     saved = {"command": "pytest", "operation_id": "f" * 32, "status": "passed",
              "applies_to_current_code": True}
-    router.registry.save_test(workspace_id, target_id, saved)
+    EvidenceRegistry(router.registry.path).save_test(workspace_id, target_id, saved)
     def forbidden(*args, **kwargs):
         raise AssertionError("write path called a legacy test-evidence helper")
 
     with monkeypatch.context() as blocked:
         for method in ("last_test", "latest_test_attempt", "test_attempt_for_job",
                        "test_attempt", "begin_test_attempt", "update_test_attempt", "save_test"):
-            blocked.setattr(router.registry, method, forbidden)
+            blocked.setattr(router.registry, method, forbidden, raising=False)
         for method in ("capture", "capture_target", "compare", "invalidate"):
             blocked.setattr(test_evidence, method, forbidden)
 

@@ -1,58 +1,13 @@
-"""FastMCP server instance and executor lifecycle management."""
-
-from __future__ import annotations
-
+"""Legacy SSH MCP adapter; importing operations never constructs this server."""
 from mcp.server.fastmcp import FastMCP
-import functools
-import inspect
-import time
-from contextvars import ContextVar
-from remote_workbench import audit
 
-from remote_workbench.config import get_config, HostConfig
-from remote_workbench.ssh import SSHExecutor
 from remote_workbench.compute_review import REVIEW_INSTRUCTIONS
-from remote_workbench.auth_boundary import authentication_command, refusal
-
-class AuditedMCP(FastMCP):
-    def tool(self, *args, **kwargs):
-        register = super().tool(*args, **kwargs)
-        def decorate(function):
-            @functools.wraps(function)
-            async def call(*a, **kw):
-                # Reading audit records should not generate recursive audit noise.
-                if function.__name__ in {"ssh_read_output", "ssh_search_output", "ssh_job_status", "ssh_job_wait", "ssh_audit_list", "ssh_audit_get"}:
-                    return await function(*a, **kw)
-                bound = inspect.signature(function).bind(*a, **kw)
-                if (function.__name__ in {"ssh_run", "ssh_run_background"}
-                        and authentication_command(bound.arguments.get("command", ""))):
-                    record_id = audit.create(kind="tool", tool=function.__name__,
-                        arguments={"command": "[authentication arguments omitted]"}, status="failed",
-                        error="authentication_requires_user_terminal")
-                    return dict(refusal(), operation_id=record_id)
-                record_id = audit.create(kind="tool", tool=function.__name__, arguments=dict(bound.arguments),
-                                         host=bound.arguments.get("host"), cwd=bound.arguments.get("cwd"), status="running")
-                token = audit.operation_id.set(record_id)
-                started = time.monotonic()
-                try:
-                    result = await function(*a, **kw)
-                    audit.update(record_id, status="failed" if isinstance(result, dict) and result.get("error") else "finished",
-                                 output_id=result.get("output_id") if isinstance(result, dict) else None,
-                                 elapsed_ms=round((time.monotonic()-started)*1000))
-                    if isinstance(result, dict):
-                        result.setdefault("operation_id", record_id)
-                    return result
-                except BaseException as exc:
-                    audit.update(record_id, status="failed", error=str(exc))
-                    raise
-                finally:
-                    audit.operation_id.reset(token)
-            register(call)
-            return call
-        return decorate
+# Preserve existing Python imports while the implementation lives below MCP.
+from remote_workbench.tool_runtime import get_executor, require_connection, workspace_executor
+from remote_workbench.tools import audit, commands, connection, files, git, patch, search
 
 
-mcp = AuditedMCP(
+mcp = FastMCP(
     "remote-workbench-ssh",
     instructions=(
         "Use explicit host and an existing ControlMaster. Inspect, edit and test on the remote. "
@@ -64,50 +19,17 @@ mcp = AuditedMCP(
     ),
 )
 
-# Executor cache: one per host
-_executors: dict[str, SSHExecutor] = {}
-
-# A bound workspace supplies its executor per request, without mutating global
-# host configuration. Independent workspace servers/tasks cannot change it.
-workspace_executor: ContextVar[tuple[str, SSHExecutor] | None] = ContextVar(
-    "remote-workbench_workspace_executor", default=None
-)
-
-
-def get_executor(host: str | None = None) -> SSHExecutor:
-    """Get or create an SSHExecutor for the given host."""
-    binding = workspace_executor.get()
-    if binding is not None:
-        alias, executor = binding
-        if host is not None and host != alias:
-            raise ValueError("This workspace is bound to a different host")
-        return executor
-    config = get_config()
-    host_config = config.get_host(host)
-    key = host or config.default_host or next(iter(config.hosts))
-    if key not in _executors:
-        _executors[key] = SSHExecutor(host_config)
-    return _executors[key]
-
-
-async def require_connection(host: str | None = None) -> SSHExecutor:
-    """Get an executor and verify the connection is alive.
-
-    Raises ValueError with a helpful message if disconnected.
-    """
-    executor = get_executor(host)
-    connected, message = await executor.check_connection()
-    if not connected:
-        raise ValueError(message)
-    return executor
-
-
-# Import tool modules to register them with the mcp instance.
-# These modules use `from remote_workbench.server import mcp` and decorate functions with @mcp.tool().
-from remote_workbench.tools import connection  # noqa: E402, F401
-from remote_workbench.tools import commands  # noqa: E402, F401
-from remote_workbench.tools import files  # noqa: E402, F401
-from remote_workbench.tools import search  # noqa: E402, F401
-from remote_workbench.tools import git  # noqa: E402, F401
-from remote_workbench.tools import audit as audit_tools  # noqa: E402, F401
-from remote_workbench.tools import patch  # noqa: E402, F401
+for operation in (
+    connection.ssh_check_connection,
+    commands.ssh_run, commands.ssh_run_background, commands.ssh_stop_job,
+    commands.ssh_job_status, commands.ssh_job_wait,
+    files.ssh_read_file, files.ssh_write_file, files.ssh_list_dir, files.ssh_file_info,
+    files.ssh_patch_file, files.ssh_mkdir, files.ssh_move, files.ssh_delete,
+    files.ssh_fetch_image, files.ssh_download, files.ssh_append_file,
+    files.ssh_insert_lines, files.ssh_replace_lines,
+    search.ssh_grep, search.ssh_find_files,
+    git.ssh_git_status, git.ssh_git_diff, git.ssh_git_log,
+    audit.ssh_read_output, audit.ssh_search_output, audit.ssh_audit_list, audit.ssh_audit_get,
+    patch.ssh_apply_patch,
+):
+    mcp.add_tool(operation)

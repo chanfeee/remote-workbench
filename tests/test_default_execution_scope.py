@@ -4,6 +4,7 @@ Every SSH call uses a local shim. The fixture starts with an independent Git
 repository so pytest's temporary parent cannot become the project boundary.
 """
 from __future__ import annotations
+from scripts.offline.evidence_registry import EvidenceRegistry
 
 import asyncio
 import hashlib
@@ -323,21 +324,21 @@ async def test_default_execution_paths_leave_legacy_test_history_untouched(
                     target_id, workspace_id, binding["host"], binding["source_cwd"],
                     binding["cwd"], binding["project_root"],
                 )
-                attempt = registry.begin_test_attempt(
+                attempt = EvidenceRegistry(registry.path).begin_test_attempt(
                     workspace_id, target, attempt_id="a" * 32,
                     job_id="legacy-acceptance-attempt", command="python3 -m unittest -v",
                     cwd=binding["cwd"], execution_kind="foreground", started_at=123.0,
                     before={"code": {"complete": True, "digest": "seed-before"}},
                     revision=binding["revision"],
                 )
-                registry.update_test_attempt(
+                EvidenceRegistry(registry.path).update_test_attempt(
                     workspace_id, attempt["attempt_id"], state="finished",
                     process_exit_status="success", exit_code=0, test_result="success",
                     summary={"tests_run": 1, "passed": 1},
                     after={"code": {"complete": True, "digest": "seed-after"}},
                     finished_at=124.0,
                 )
-                registry.save_test(workspace_id, target_id, {
+                EvidenceRegistry(registry.path).save_test(workspace_id, target_id, {
                     "attempt_id": attempt["attempt_id"],
                     "attempt_order": attempt["attempt_order"],
                     "status": "legacy-success-marker",

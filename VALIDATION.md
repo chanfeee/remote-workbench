@@ -1,5 +1,14 @@
 # Validation status
 
+## Runtime simplification (2026-11-06, unreleased)
+
+- **868 tests passed in 217.79 seconds** with the complete local suite (`python -m pytest -q --tb=short --durations=8`). Coverage includes operation records, authentication redaction, guarded edits, combined calls, job idempotency/recovery across real MCP stdio restarts, loopback proxy/viewer behavior and inline resources. No real SSH host was used.
+- Sorted serialized tool descriptors are identical before and after the refactor for the session (8), fixed-workspace (20) and legacy SSH (29) catalogs. A fresh-interpreter regression verifies that session/fixed-workspace startup does not load the legacy server, audit viewer or source-only offline tools, even when FastAPI, WebSockets and AsyncSSH are unavailable.
+- Ordinary registries no longer create/migrate historical test tables or expose their writer methods. Existing history reads remain available and tolerate databases without those tables. Historical writers are explicitly accessed through source-only `scripts/offline/evidence_registry.py`; preservation and launch-order tests passed.
+- Offline wheel/sdist builds and the frozen lock check passed. The wheel omits offline helpers and declares only MCP/PyYAML as direct default dependencies; `web` and `proxy` dependencies have extra markers. All third-party lock entries, versions and hashes are unchanged. The runtime Python sources contain 1,337 fewer lines; offline implementations remain available in the source distribution.
+- An extracted wheel completed a real MCP stdio handshake, listed all 8 tools, served the inline HTML resource and returned the installed package path from local workspace metadata, with optional packages blocked. The extracted source distribution's offline ledger CLI also ran independently.
+- Initial sandbox-only regression failures were traced to blocked `ps` and loopback binding; the permitted local suite above passed. Stable installation, existing MCP processes and remote data were not updated. This change does not establish a token or latency improvement.
+
 ## Desktop minimum-height follow-up (0.4.4)
 
 - A user screenshot of the actual 0.4.3 card still showed blank space. Its previous browser mock accepted small heights directly and omitted the installed host's default 200px minimum; those passing tests did not establish the desktop result.

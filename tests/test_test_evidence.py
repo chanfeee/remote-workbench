@@ -1,4 +1,4 @@
-from remote_workbench.test_evidence import observation, compare, invalidate
+from scripts.offline.test_evidence import observation, compare, invalidate
 
 
 def point(digest='abc', complete=True, config='env'):

@@ -7,10 +7,10 @@ import shutil
 import tempfile
 from remote_workbench.remote_client import edit as remote_edit
 
-from remote_workbench.server import mcp, require_connection
+from remote_workbench.tool_runtime import audited_operation, require_connection
 
 
-@mcp.tool()
+@audited_operation
 async def ssh_read_file(path: str | list[str], offset: int = 0, limit: int = 160, host: str | None = None, max_bytes: int = 8192,
                         for_edit: bool = False, local_copy: bool = True) -> dict:
     """Read numbered lines from one path or up to 16 explicit paths in one SSH request. for_edit returns per-file edit_id snapshots; no project scan. offset is 0-based; max_bytes is per file."""
@@ -75,14 +75,14 @@ async def read_selected(executor, selection, *, max_bytes=4096, offset=0, limit=
     return results
 
 
-@mcp.tool()
+@audited_operation
 async def ssh_write_file(path: str, content: str, create_dirs: bool = False, host: str | None = None, expected_sha256: str | None = None) -> dict:
     """Write UTF-8 content atomically on the remote host, preserving existing mode/owner."""
     executor = await require_connection(host)
     return await remote_edit(executor, {"op": "write", "path": path, "content": content, "create_dirs": create_dirs, "expected_sha256": expected_sha256})
 
 
-@mcp.tool()
+@audited_operation
 async def ssh_list_dir(
     path: str = ".",
     pattern: str = "*",
@@ -150,7 +150,7 @@ async def ssh_list_dir(
     }
 
 
-@mcp.tool()
+@audited_operation
 async def ssh_file_info(
     path: str,
     host: str | None = None,
@@ -191,7 +191,7 @@ async def ssh_file_info(
     }
 
 
-@mcp.tool()
+@audited_operation
 async def ssh_patch_file(path: str, old: str | None = None, new: str | None = None, host: str | None = None,
                          edits: list[dict[str, str]] | None = None, expected_sha256: str | None = None,
                          check_only: bool = False, max_bytes: int = 8192) -> dict:
@@ -213,7 +213,7 @@ async def ssh_patch_file(path: str, old: str | None = None, new: str | None = No
         "expected_sha256": expected_sha256, "check_only": check_only}, max_bytes=max_bytes)
 
 
-@mcp.tool()
+@audited_operation
 async def ssh_mkdir(
     path: str,
     parents: bool = True,
@@ -235,7 +235,7 @@ async def ssh_mkdir(
     return {"success": True, "path": path}
 
 
-@mcp.tool()
+@audited_operation
 async def ssh_move(
     source: str,
     dest: str,
@@ -256,7 +256,7 @@ async def ssh_move(
     return {"success": True, "source": source, "dest": dest}
 
 
-@mcp.tool()
+@audited_operation
 async def ssh_delete(
     path: str,
     recursive: bool = False,
@@ -278,7 +278,7 @@ async def ssh_delete(
     return {"success": True, "path": path}
 
 
-@mcp.tool()
+@audited_operation
 async def ssh_fetch_image(path: str, page: int = 1, host: str | None = None) -> dict:
     """Fetch a remote plot to this chat's private local cache; return paths, never image/base64 data.
 
@@ -293,7 +293,7 @@ async def ssh_fetch_image(path: str, page: int = 1, host: str | None = None) -> 
     return await fetch_image(executor, path, page)
 
 
-@mcp.tool()
+@audited_operation
 async def ssh_download(
     remote_path: str,
     local_dir: str = "",
@@ -349,14 +349,14 @@ async def ssh_download(
     }
 
 
-@mcp.tool()
+@audited_operation
 async def ssh_append_file(path: str, content: str, host: str | None = None, expected_sha256: str | None = None) -> dict:
     """Append remotely with a cooperative lock and atomic replacement."""
     executor = await require_connection(host)
     return await remote_edit(executor, {"op": "append", "path": path, "content": content, "expected_sha256": expected_sha256})
 
 
-@mcp.tool()
+@audited_operation
 async def ssh_insert_lines(path: str, after_line: int, content: str, host: str | None = None,
                            expected_sha256: str | None = None) -> dict:
     """Insert after a 1-based line, or 0 to prepend. Use expected_sha256 to guard line positions."""
@@ -367,7 +367,7 @@ async def ssh_insert_lines(path: str, after_line: int, content: str, host: str |
         "content": content, "expected_sha256": expected_sha256})
 
 
-@mcp.tool()
+@audited_operation
 async def ssh_replace_lines(path: str, start_line: int, end_line: int, content: str = "", host: str | None = None,
                             expected_sha256: str | None = None, expected_old: str | None = None) -> dict:
     """Replace inclusive 1-based lines, optionally checking the hash and exact old range."""

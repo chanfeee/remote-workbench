@@ -22,8 +22,7 @@ from mcp.server.fastmcp.exceptions import ToolError
 
 from remote_workbench import audit
 from remote_workbench.config import load_config
-from remote_workbench.audit_web import Handler as AuditViewerHandler, handler_for_directory, handler_for_instance
-from remote_workbench.server import workspace_executor
+from remote_workbench.tool_runtime import workspace_executor
 from remote_workbench.ssh import SSHExecutor
 from remote_workbench.compute_review import REVIEW_INSTRUCTIONS
 from remote_workbench.tool_interface import CALL_SOURCE_INSTRUCTIONS
@@ -303,6 +302,7 @@ def _local_audit_viewer(port: int | None, *, audit_dir=None, handler=None):
     if isinstance(port, bool) or not 0 <= port <= 65535:
         raise ValueError("viewer port must be between 0 and 65535")
 
+    from remote_workbench.audit_web import Handler as AuditViewerHandler, handler_for_directory, handler_for_instance
     handler = handler or (handler_for_directory(audit_dir) if audit_dir is not None else AuditViewerHandler)
     instance_id = uuid.uuid4().hex
     handler = handler_for_instance(handler, instance_id)

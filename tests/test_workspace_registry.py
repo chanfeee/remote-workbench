@@ -1,3 +1,4 @@
+from scripts.offline.evidence_registry import EvidenceRegistry
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 import os
@@ -195,6 +196,18 @@ def test_saved_target_is_immutable_and_conflict_leaves_history_unchanged(tmp_pat
     assert len(registry.history(state.workspace_id)) == 1
 
 
+def test_normal_registry_reads_missing_legacy_history_without_creating_tables(tmp_path):
+    registry = Registry(tmp_path / "registry.sqlite3")
+    state = registry.get_or_create("thread")
+    assert registry.last_test(state.workspace_id, "target") is None
+    assert registry.latest_test_attempt(state.workspace_id, "target") is None
+    assert registry.test_attempt(state.workspace_id, "attempt") is None
+    assert registry.test_attempt_for_job(state.workspace_id, "job") is None
+    with registry._connection() as db:
+        names = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    assert not {"last_tests", "test_attempts"} & names
+
+
 def test_test_attempts_persist_launch_order_and_cas_reliable_observations(tmp_path):
     path = tmp_path / "registry.sqlite3"
     registry = Registry(path)
@@ -203,19 +216,19 @@ def test_test_attempts_persist_launch_order_and_cas_reliable_observations(tmp_pa
     registry.commit_switch(state.workspace_id, 0, origin, remote_state_dir="/runtime/unit-test")
     before = {"code": {"complete": True, "digest": "same"}, "config_digest": "cfg"}
 
-    older = registry.begin_test_attempt(
+    older = EvidenceRegistry(registry.path).begin_test_attempt(
         state.workspace_id, origin, attempt_id="a" * 32, job_id="test-old",
         command="python -m unittest", cwd=origin.cwd, execution_kind="background",
         started_at=100.0, before=before, revision=1,
     )
-    retry = registry.begin_test_attempt(
+    retry = EvidenceRegistry(registry.path).begin_test_attempt(
         state.workspace_id, origin, attempt_id="d" * 32, job_id="test-old",
         command="python -m unittest", cwd=origin.cwd, execution_kind="background",
         started_at=999.0, before=before, revision=1,
     )
     assert retry["attempt_id"] == older["attempt_id"]
     assert retry["attempt_order"] == older["attempt_order"]
-    newer = registry.begin_test_attempt(
+    newer = EvidenceRegistry(registry.path).begin_test_attempt(
         state.workspace_id, origin, attempt_id="b" * 32, job_id="test-new",
         command="python -m unittest", cwd=origin.cwd, execution_kind="foreground",
         started_at=101.0, before=before, revision=2,
@@ -230,7 +243,7 @@ def test_test_attempts_persist_launch_order_and_cas_reliable_observations(tmp_pa
         "process_exit_status": "success", "test_result": "success", "status": "passed",
         "before": before, "after": before, "observed_at": 200.0,
     }
-    registry.update_test_attempt(
+    EvidenceRegistry(registry.path).update_test_attempt(
         state.workspace_id, older["attempt_id"], state="finished",
         process_exit_status="success", exit_code=0, test_result="success",
         after=before, observation=older_observation, expected_target_id=origin.target_id,
@@ -244,7 +257,7 @@ def test_test_attempts_persist_launch_order_and_cas_reliable_observations(tmp_pa
         "process_exit_status": "failed", "test_result": "failed", "status": "failed",
         "before": before, "after": before, "observed_at": 150.0,
     }
-    registry.update_test_attempt(
+    EvidenceRegistry(registry.path).update_test_attempt(
         state.workspace_id, newer["attempt_id"], state="failed",
         process_exit_status="failed", exit_code=1, test_result="failed",
         after=before, observation=newer_observation, expected_target_id=origin.target_id,
@@ -254,14 +267,14 @@ def test_test_attempts_persist_launch_order_and_cas_reliable_observations(tmp_pa
 
     # A later launch is visible immediately, while the most recent reliable
     # observation stays separately available until the new job has a terminal.
-    latest = registry.begin_test_attempt(
+    latest = EvidenceRegistry(registry.path).begin_test_attempt(
         state.workspace_id, origin, attempt_id="c" * 32, job_id="test-unknown",
         command="python -m unittest", cwd=origin.cwd, execution_kind="background",
         started_at=102.0, before=before, revision=3,
     )
     assert registry.latest_test_attempt(state.workspace_id, origin.target_id)["attempt_id"] == "c" * 32
     assert registry.last_test(state.workspace_id, origin.target_id)["attempt_id"] == "b" * 32
-    registry.update_test_attempt(
+    EvidenceRegistry(registry.path).update_test_attempt(
         state.workspace_id, latest["attempt_id"], state="unknown",
         error="lost response", expected_target_id=origin.target_id,
         expected_job_id=latest["job_id"],
@@ -270,7 +283,7 @@ def test_test_attempts_persist_launch_order_and_cas_reliable_observations(tmp_pa
     assert unknown_attempt["state"] == "unknown"
     assert unknown_attempt["finished_at"] is None
     assert registry.last_test(state.workspace_id, origin.target_id)["attempt_id"] == "b" * 32
-    registry.update_test_attempt(
+    EvidenceRegistry(registry.path).update_test_attempt(
         state.workspace_id, latest["attempt_id"], state="running",
         expected_target_id=origin.target_id, expected_job_id=latest["job_id"],
     )
@@ -280,7 +293,7 @@ def test_test_attempts_persist_launch_order_and_cas_reliable_observations(tmp_pa
         "process_exit_status": "success", "test_result": "unknown", "status": "unknown",
         "before": before, "after": before, "observed_at": 300.0,
     }
-    registry.update_test_attempt(
+    EvidenceRegistry(registry.path).update_test_attempt(
         state.workspace_id, latest["attempt_id"], state="finished",
         process_exit_status="success", exit_code=0, test_result="unknown",
         after=before, observation=unknown_report, expected_target_id=origin.target_id,
@@ -293,7 +306,7 @@ def test_test_attempts_persist_launch_order_and_cas_reliable_observations(tmp_pa
     # the attempt's first reliable observation or the target's newer result.
     original = registry.last_test(state.workspace_id, origin.target_id)
     changed = dict(older_observation, observed_at=999.0, status="failed")
-    registry.update_test_attempt(
+    EvidenceRegistry(registry.path).update_test_attempt(
         state.workspace_id, older["attempt_id"], state="failed",
         process_exit_status="failed", exit_code=1, test_result="failed",
         observation=changed, expected_target_id=origin.target_id,

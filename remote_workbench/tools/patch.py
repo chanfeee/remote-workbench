@@ -1,10 +1,10 @@
-from remote_workbench.server import mcp, require_connection
+from remote_workbench.tool_runtime import audited_operation, require_connection
 from remote_workbench.remote_client import edit
 from remote_workbench.call_arguments import patch_text
 from remote_workbench.edit_spec import FileEdit, edits_patch, prepared_edits, validate_prepared_edits
 
 
-@mcp.tool()
+@audited_operation
 async def ssh_apply_patch(patch: str | list[str] | None = None, cwd: str = ".", host: str | None = None, check_only: bool = False,
                           edits: list[FileEdit] | None = None, expected_files: dict[str, str] | None = None,
                           expected_repository: str | None = None, prepared_contents: dict[str, str] | None = None) -> dict:

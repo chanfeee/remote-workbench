@@ -3,6 +3,10 @@
 import os
 import stat
 
+import pytest
+
+pytest.importorskip("asyncssh", reason="install the proxy extra to test gateway keys")
+
 from remote_workbench import proxy_key
 
 

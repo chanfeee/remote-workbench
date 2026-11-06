@@ -8,7 +8,7 @@ import re
 import time
 import uuid
 from remote_workbench import audit
-from remote_workbench.server import mcp, require_connection, get_executor
+from remote_workbench.tool_runtime import audited_operation, require_connection, get_executor
 from remote_workbench.remote_client import edit
 from remote_workbench import job_collector
 from remote_workbench.compute_review import check_compute_review
@@ -19,7 +19,7 @@ from remote_workbench.remote_program import program_command
 _SAFE_JOB_ID = re.compile(r"^[a-zA-Z0-9_-]{1,80}$")
 
 
-@mcp.tool()
+@audited_operation
 async def ssh_run(command: Command, cwd: str | None = None, timeout: int | None = None,
                   host: str | None = None, max_bytes: int = 16384, trace: bool = False,
                   compute_review: dict | None = None, stdin: str | None = None) -> dict:
@@ -66,7 +66,7 @@ async def ssh_run(command: Command, cwd: str | None = None, timeout: int | None 
     return value
 
 
-@mcp.tool()
+@audited_operation
 async def ssh_run_background(command: str, cwd: str | None = None, job_id: str = "", host: str | None = None,
                              timeout: int | None = None, compute_review: dict | None = None,
                              idempotency_key: str | None = None, wait_seconds: float = 0,
@@ -115,7 +115,7 @@ async def ssh_run_background(command: str, cwd: str | None = None, job_id: str =
     return launched
 
 
-@mcp.tool()
+@audited_operation
 async def ssh_stop_job(job_id: str, host: str | None = None) -> dict:
     """Request TERM -> KILL of a supervised job, even with execution disabled.
 
@@ -133,7 +133,7 @@ async def ssh_stop_job(job_id: str, host: str | None = None) -> dict:
     return await executor.cancel_task(job_id, origin=origin)
 
 
-@mcp.tool()
+@audited_operation
 async def ssh_job_status(job_id: str, tail_lines: int = 50, host: str | None = None,
                          stdout_cursor: int = 0, stderr_cursor: int = 0, max_bytes: int = 8192) -> dict:
     """Get job state and incremental output. Reuse next_stdout_cursor/next_stderr_cursor.
@@ -236,7 +236,7 @@ def _job_is_terminal(info):
             info.get("execution_state") in {"finished", "failed", "cancelled", "timed_out"})
 
 
-@mcp.tool()
+@audited_operation
 async def ssh_job_wait(job_id: str, host: str | None = None, wait_seconds: float = 10.0,
                        stdout_cursor: int = 0, stderr_cursor: int = 0, max_bytes: int = 8192) -> dict:
     """Wait once for local background-log progress, completion or a bounded wait deadline.
