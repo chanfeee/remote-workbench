@@ -7,6 +7,7 @@
 - Make the standalone Web/PTY launcher and SSH gateway dependencies optional through the `web` and `proxy` extras. Keep default MCP/inline-card startup independent of these packages, load the separate audit viewer only on request, and explain missing extras before starting a feature.
 - Extract session execution, patch follow-up and job reservation from the MCP adapter. Share redacted authentication refusals and remove duplicate retry branches while preserving whole-file writes, substring replacements, patches, guarded edits and original-target job recovery.
 - Give each operation a stable independent inline-card identity so later commands and patches do not replace earlier cards in desktop history. Restore canonical result envelopes and delayed history metadata without re-executing commands or changing model-visible output. Keep older resource URIs readable; previously saved cards without an identity are not rewritten.
+- Qualify command and diff history in the actual App: both pairs of cards remained after chat navigation, and both line diffs could be expanded. Add English/Chinese release notes and a fixed-candidate tag publication path; manually dispatched releases remain drafts.
 
 ## 0.4.4 — remove the host's inline minimum height
 

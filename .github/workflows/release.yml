@@ -1,6 +1,9 @@
-name: Prepare stable release
+name: Stable release
 
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       version:
@@ -17,8 +20,10 @@ concurrency:
 
 jobs:
   release:
-    name: Validate and draft stable release
-    if: github.ref == 'refs/heads/main'
+    name: Validate and prepare stable release
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -33,7 +38,7 @@ jobs:
       - name: Check out the stable candidate
         uses: actions/checkout@v6.0.3
         with:
-          ref: stable
+          ref: ${{ github.event_name == 'push' && github.ref || 'stable' }}
           fetch-depth: 0
           path: candidate
           persist-credentials: false
@@ -51,10 +56,18 @@ jobs:
       - name: Validate immutable candidate and version
         env:
           RELEASE_VERSION: ${{ inputs.version }}
-        run: >-
-          python release-tools/scripts/check_release_candidate.py
-          --project candidate --version "$RELEASE_VERSION"
-          --output "$RUNNER_TEMP/release-candidate.json"
+          RELEASE_EVENT: ${{ github.event_name }}
+          RELEASE_REF: ${{ github.ref }}
+        run: |
+          if [ "$RELEASE_EVENT" = "push" ]; then
+            python release-tools/scripts/check_release_candidate.py \
+              --project candidate --tag-ref "$RELEASE_REF" \
+              --output "$RUNNER_TEMP/release-candidate.json"
+          else
+            python release-tools/scripts/check_release_candidate.py \
+              --project candidate --version "$RELEASE_VERSION" \
+              --output "$RUNNER_TEMP/release-candidate.json"
+          fi
 
       - name: Confirm browser-script test runtime
         run: node --version
@@ -64,10 +77,9 @@ jobs:
         run: uv run --frozen --python 3.13 --extra dev --extra images pytest -q
 
       - name: Recheck tested sources before building
-        env:
-          RELEASE_VERSION: ${{ inputs.version }}
-        run: >-
-          python release-tools/scripts/check_release_candidate.py
+        run: |
+          RELEASE_VERSION=$(python -c 'import json,os; print(json.load(open(os.environ["RUNNER_TEMP"]+"/release-candidate.json"))["version"])')
+          python release-tools/scripts/check_release_candidate.py \
           --project candidate --version "$RELEASE_VERSION"
 
       - name: Build release assets
@@ -78,11 +90,19 @@ jobs:
           cd dist
           sha256sum *.whl *.tar.gz runtime-requirements.txt > SHA256SUMS
 
-      - name: Create an unpublished draft from the verified commit
+      - name: Publish an explicit tag or prepare a manual draft
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          RELEASE_EVENT: ${{ github.event_name }}
         run: |
           TAG=$(python -c 'import json,os; print(json.load(open(os.environ["RUNNER_TEMP"]+"/release-candidate.json"))["tag"])')
           COMMIT=$(python -c 'import json,os; print(json.load(open(os.environ["RUNNER_TEMP"]+"/release-candidate.json"))["commit"])')
-          gh release create "$TAG" candidate/dist/* --target "$COMMIT" --title "$TAG" --generate-notes --draft
+          if [ "$RELEASE_EVENT" = "push" ]; then
+            test -f "candidate/docs/releases/$TAG.md"
+            gh release create "$TAG" candidate/dist/* --verify-tag --target "$COMMIT" \
+              --title "Remote Workbench $TAG" --notes-file "candidate/docs/releases/$TAG.md" --draft
+            gh release edit "$TAG" --draft=false --latest
+          else
+            gh release create "$TAG" candidate/dist/* --target "$COMMIT" --title "$TAG" --generate-notes --draft
+          fi

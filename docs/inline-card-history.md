@@ -64,3 +64,7 @@ README. Re-executing an operation is not a recovery method.
   cards remained visible. The chat was restored to local mode. Full App restart
   and UI pagination were not exercised, and no new agent token benchmark is
   claimed. Private deployment details remain outside the published sources.
+- A separate managed-edit check produced two full diff cards with different
+  identities, restored the small fixture and removed its temporary directory.
+  The user switched chats and returned, then confirmed both diff cards remained
+  and both line diffs could be expanded. No runtime change was required.

@@ -2,6 +2,8 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
+[v0.4.5 release notes](docs/releases/v0.4.5.md) · [Downloads](https://github.com/chanfeee/remote-workbench/releases/tag/v0.4.5)
+
 Remote Workbench gives a local agent command and file access to an explicitly selected SSH server and project directory. The agent, MCP server, and operation records stay local. The remote side runs ordinary commands and a small Python worker sent over SSH; it needs no Codex CLI or separately installed service.
 
 - Switch between local work and several remote servers, with independent bindings for each chat.
@@ -117,7 +119,7 @@ This command reads existing local files only. It does not open SSH or start a we
 
 Managed edits record their own changes. Git diff is an explicitly requested view of current differences; the record does not track every file written by arbitrary shell commands or external terminals.
 
-The inline frontend reuses liteRemote's activity and file-review components: command/exit/time facts, per-file additions/deletions, and expandable colored diffs. A zero exit does not override unknown remote completion/cleanup; refused execution and pending cancellation have separate labels. Explanatory footers, visible record IDs, repeated command labels and empty groups are omitted. Stable 0.4.5 was loaded in the actual App and exercised through real SSH; the user confirmed that two consecutive command cards remained after switching chats and returning. Full App restart and UI pagination remain separate acceptance cases. No near-local token/time result is implied.
+The inline frontend reuses liteRemote's activity and file-review components: command/exit/time facts, per-file additions/deletions, and expandable colored diffs. A zero exit does not override unknown remote completion/cleanup; refused execution and pending cancellation have separate labels. Explanatory footers, visible record IDs, repeated command labels and empty groups are omitted. Stable 0.4.5 was loaded in the actual App and exercised through real SSH; the user confirmed that two command cards and two diff cards remained after switching chats and returning, with both line diffs expandable. Full App restart and UI pagination remain separate acceptance cases. No near-local token/time result is implied.
 
 For images, ask the agent to show a remote PNG/JPG or a selected PDF page. `fetch_image` saves a local copy and returns a chat preview reference without putting base64 in MCP text. PDF/SVG previews need the optional local rendering packages:
 

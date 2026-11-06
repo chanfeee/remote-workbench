@@ -1,9 +1,16 @@
 # Validation status
 
+## v0.4.5 release preparation (2026-11-06)
+
+- **24 targeted release checks passed**. Tests execute both the explicit-tag and manual-draft shell paths, preserve fixed-candidate checks before/after testing, reject invalid tag refs and verify that a failed draft/asset creation cannot proceed to publication.
+- The release workflow publishes only an explicitly pushed version tag after validating it against the fetched stable commit, testing and building. Manual dispatch retains draft-only behavior. English/Chinese release notes include the actual command/diff navigation acceptance and its limits.
+- This preparation changes release tooling and documentation; the MCP runtime sources, package version and dependency lock are unchanged from the App-qualified 0.4.5 runtime.
+
 ## Actual App 0.4.5 card-history acceptance (2026-11-06)
 
 - After MCP reload, App-native workspace metadata reported the installed stable 0.4.5 package. Two short print commands completed through an existing manually authenticated SSH connection. Both saved MCP results retained v7 resources and different operation-based widget identities; the chat was then returned to local mode.
 - The user switched to another chat and returned, and confirmed that **both command cards remained visible**. This verifies the reported navigation/history case in the actual App. A complete App restart and UI output-pagination controls were not exercised in this follow-up; old saved cards without independent identities are not rewritten.
+- A separate real-SSH check modified a small script and restored it, generating two independent full diff cards and two successful follow-up executions. After another command and chat navigation, the user confirmed that **both diff cards remained and their line diffs could be expanded**. The isolated fixture was removed and the chat returned to local mode; no scientific project was modified.
 - Stable commit `714ebec` passed all four Python 3.10–3.13 CI jobs and the package build. The installed fixed commit and existing session state were preserved; the project candidate override was removed, leaving enable/disable under the user's App settings. Exact host details, paths and operation identifiers remain in ignored local reports.
 
 ## Stable 0.4.5 integration (2026-11-06)

@@ -12,6 +12,13 @@ def git(project, *args, check=True):
                           text=True, check=check)
 
 
+def version_from_tag(ref):
+    match = re.fullmatch(r'refs/tags/v((0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))', ref)
+    if match is None:
+        raise ValueError('Use an explicit version tag refs/tags/vX.Y.Z')
+    return match.group(1)
+
+
 def validate(project, version, stable_ref='refs/remotes/origin/stable'):
     try:
         import tomllib
@@ -40,11 +47,13 @@ def validate(project, version, stable_ref='refs/remotes/origin/stable'):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--project', type=Path, required=True)
-    p.add_argument('--version', required=True)
+    version = p.add_mutually_exclusive_group(required=True)
+    version.add_argument('--version')
+    version.add_argument('--tag-ref', help='Explicit refs/tags/vX.Y.Z event reference')
     p.add_argument('--output', type=Path)
     a = p.parse_args()
     try:
-        result = validate(a.project, a.version)
+        result = validate(a.project, version_from_tag(a.tag_ref) if a.tag_ref is not None else a.version)
     except (ValueError, OSError, KeyError, subprocess.CalledProcessError) as exc:
         p.error(str(exc))
     if a.output:
