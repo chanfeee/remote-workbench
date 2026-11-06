@@ -45,17 +45,22 @@ README. Re-executing an operation is not a recovery method.
 - An isolated candidate is based on the installed 0.4.4 package with only
   `inline_app.py` and `operation_card.html` replaced. Its real local MCP stdio
   preflight passed with eight tools, v7 and all four historical resource URIs,
-  starting in local mode. The daily stable installation is unchanged.
+  starting in local mode. At that candidate-only step, the daily stable
+  installation was unchanged.
 - The temporary project MCP override was removed after it pinned
   `enabled = true`. Its replacement overrides only the candidate `command`;
   enable/disable, arguments, environment and approval policy inherit App
   settings. The bundled CLI's effective-config reader confirmed the candidate
-  command and inherited settings. No global switch was changed. Loading the
-  candidate and checking the switch in the actual App still require acceptance.
-- Returning to/reopening a chat in the actual App still requires acceptance
-  after loading this candidate. The replay and bridge tests are not that visual
-  acceptance, and no new CERN/IHEP execution or agent token benchmark is claimed.
+  command and inherited settings. Stable rollout subsequently removed the
+  project override completely; no global switch was changed.
 - The complete 0.4.5 integration, including the runtime simplification, passed
   869 local tests in 215.65 seconds with no skips. Wheel/sdist construction and
-  package-boundary checks passed; branch CI and the actual loaded App runtime
-  are checked separately during stable rollout.
+  package-boundary checks passed. Stable commit `714ebec` also passed the four
+  Python 3.10–3.13 CI jobs and the package build.
+- Actual App follow-up confirmed the loaded stable 0.4.5 package and two
+  successful short commands through an existing manual SSH connection. Both
+  persisted results contained different operation-based widget identities.
+  The user navigated to another chat and returned, then confirmed both command
+  cards remained visible. The chat was restored to local mode. Full App restart
+  and UI pagination were not exercised, and no new agent token benchmark is
+  claimed. Private deployment details remain outside the published sources.
