@@ -10,7 +10,7 @@ from remote_workbench import audit
 from remote_workbench.presentation import parse_unified_diff, summarize_record
 from remote_workbench.session_context import get_codex_identity
 
-RESOURCE_URI = 'ui://remote-workbench/operation-v4.html'
+RESOURCE_URI = 'ui://remote-workbench/operation-v5.html'
 CARD_TOOLS = frozenset({'exec_command', 'apply_patch'})
 PREVIEW_BYTES = 4096
 

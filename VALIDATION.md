@@ -1,5 +1,13 @@
 # Validation status
 
+## Compact card layout and intrinsic height (0.4.3)
+
+- **31 targeted tests passed in 9.41 seconds**, covering actual local MCP/resource/result delivery, the renderer/bridge, original output/diff records, installation ordering and release checks. The preceding 864-test run belongs to 0.4.2; full branch CI is checked separately for this UI revision.
+
+- A headless Chrome test with a mock MCP host starts the frame at 1800px and verifies actual DOM layout, not just generated markup. The command card shrinks to **94px**, expands to **450px**, then returns to **94px**. At a 350px viewport the dark card is **116px**, without horizontal overflow; the diff card changes from **94px** to **225px** and shrinks back on collapse.
+- Commands and file rows are visible by default. Only outputs/diffs require disclosure; repeated activity/count/section headings are removed. Full actual host/cwd, process/unknown/refusal facts, per-file counts, escaped content and local read-more behavior remain. A bounded content wrapper replaces document scroll-height feedback; ResizeObserver/viewport events update height and equal values are not resent.
+- The Node bridge regression models a tall host viewport and changing content sizes, verifies shrink and deduplication, and retains message-source isolation, pagination, escaping and execution-state coverage. Resource v5 avoids reusing the previous card template. This is browser/component and MCP wire validation, not direct inspection of Codex's rendered inline pixels.
+
 ## Stable 0.4.2 qualification (2026-11-06)
 
 - Starting from `main` at `6776217`, the integrated release candidate passed **119 targeted tests in 24.54 seconds** and **864 complete regression tests in 206.04 seconds**. The targeted group is included in the complete run. Coverage includes per-file coordination, ignored historical directory claims, job recovery, cancellations/timeouts, compute-review refusals and inline resource/result handling, using temporary local workers and simulated SSH.

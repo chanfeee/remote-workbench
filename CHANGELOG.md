@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.3 — compact inline cards
+
+- Size inline cards from intrinsic content, observe content/viewport changes, and deduplicate height notifications. Collapsed command and diff views can shrink after expansion instead of retaining a large iframe viewport.
+- Show commands and file rows directly, with one disclosure for their output or diff. Remove duplicate activity/count/section headings, show full execution locations, and keep narrow layouts, status facts, escaping and local output paging.
+- Advance the card resource to v5. Execution, approval settings, records and the model-visible result text are unchanged.
+
 ## 0.4.2 — file coordination and inline records
 
 - Keep unknown completion/cleanup, pending cancellation, running, timeout and refused execution distinct from a zero exit in inline cards. Preserve uncertain edit facts and skip attached checks/reads; confirmed-success reply text stays unchanged. Advance the card resource to v4 to avoid stale templates.
