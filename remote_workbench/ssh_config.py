@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 
 ALIAS = "remote-workbench-local-host"
+DEFAULT_PORT = 4242
 BEGIN_MARKER = "# BEGIN remote-workbench-managed (remote-workbench-local-host)"
 END_MARKER = "# END remote-workbench-managed (remote-workbench-local-host)"
 

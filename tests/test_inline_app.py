@@ -60,6 +60,39 @@ async def test_patch_card_has_original_diff_and_followup_process_result(project)
     assert steps[1]['exit_code'] == 0
 
 
+async def test_each_operation_has_a_stable_independent_history_card(project, monkeypatch):
+    router, server, source, _ = project
+    cards = []
+    for label in ('first', 'second'):
+        wire = await wire_call(server, 'a', 'exec_command', host='a', cwd=str(source),
+                               command=['printf', label])
+        cards.append(wire)
+    patch = await wire_call(server, 'a', 'apply_patch',
+        patch='*** Begin Patch\n*** Update File: value.txt\n@@\n-original\n+updated\n*** End Patch',
+        command=['printf', 'followup'])
+    cards.append(patch)
+    identities = [wire.meta['openai/widgetSessionId'] for wire in cards]
+    assert len(set(identities)) == 3
+    # Desktop history saves the MCP result including hidden metadata. Reload
+    # the persisted form and re-decorate from existing local records only.
+    executor = router.snapshot(router.registry.get_or_create('a')).workspace.executor
+    async def forbidden(*args, **kwargs):
+        raise AssertionError('rendering history must not execute commands')
+    monkeypatch.setattr(executor, 'run', forbidden)
+    with audit.scoped_root(router.audit_dir(router.registry.get_or_create('a').workspace_id)):
+        for wire, identity in zip(cards, identities):
+            restored = types.CallToolResult.model_validate_json(wire.model_dump_json(by_alias=True))
+            tool = restored.meta['remote-workbench/operation']['steps'][0]['tool']
+            decorated = inline_app.attach_card(restored.content, tool)
+            assert decorated.meta['openai/widgetSessionId'] == identity
+            assert decorated.meta['remote-workbench/operation'] == restored.meta['remote-workbench/operation']
+            assert decorated.content == wire.content
+            assert identity.endswith(json.loads(wire.content[0].text)['operation_id'])
+    assert cards[0].meta['remote-workbench/operation']['steps'][0]['streams']['stdout']['content'] == 'first'
+    assert cards[1].meta['remote-workbench/operation']['steps'][0]['streams']['stdout']['content'] == 'second'
+    assert len(cards[2].meta['remote-workbench/operation']['steps']) == 2
+
+
 async def test_process_failure_is_not_relabelled_as_success(project):
     _, server, source, _ = project
     result = await wire_call(server, 'a', 'exec_command', host='a', cwd=str(source),
@@ -175,6 +208,13 @@ async def test_stdio_resource_catalog_and_missing_binding_are_safe(tmp_path):
             assert content.mimeType == 'text/html;profile=mcp-app'
             assert 'ui/initialize' in content.text
             assert content.meta['ui']['csp']['connectDomains'] == []
+            assert content.meta['openai/widgetMinFrameHeight'] == 0
+            assert 0 < content.meta['openai/widgetHeightHint'] < 200
+            assert content.meta['openai/widgetShowCodexWidgetInline'] is True
+            for uri in inline_app.HISTORICAL_RESOURCE_URIS:
+                historical = (await client.read_resource(uri)).contents[0]
+                assert historical.text == content.text
+                assert historical.meta == content.meta
             result = await client.call_tool('exec_command', {'command':'must never run'}, meta={'threadId':'local'})
             assert result.isError and 'no remote workspace' in result.content[0].text
 

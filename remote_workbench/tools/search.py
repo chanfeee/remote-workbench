@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from remote_workbench.server import mcp, require_connection
+from remote_workbench.tool_runtime import audited_operation, require_connection
 
 
-@mcp.tool()
+@audited_operation
 async def ssh_grep(
     pattern: str,
     path: str = ".",
@@ -70,7 +70,7 @@ async def ssh_grep(
     }
 
 
-@mcp.tool()
+@audited_operation
 async def ssh_find_files(
     path: str = ".",
     pattern: str = "*",

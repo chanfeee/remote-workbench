@@ -108,6 +108,31 @@ const command={tool:'exec_command',host:'server',cwd:'/run',command:hostile,stat
   const saved=boot(wrap([command])._meta);
   assert(saved.el('activity').innerHTML.includes('命令 <span class="section-count">1</span>'));
   assert(!saved.messages.some(x=>x.method==='tools/call'));
+  // A history snapshot is not necessarily the unwrapped live notification.
+  for(const key of ['call_tool_result','mcp_tool_result']){
+    const history=boot({status:'success',[key]:wrap([command])});
+    assert(!history.el('activity').hidden,key);
+    assert(history.el('activity').innerHTML.includes('exit 0 · 1.25s'),key);
+    assert(!history.messages.some(x=>x.method==='tools/call'),key);
+  }
+  // Restored globals can arrive after mount; no replay or network read is needed.
+  const delayed=boot();
+  delayed.events['openai:set_globals']({detail:{globals:{toolResponseMetadata:{call_tool_result:wrap([patch])}}}});
+  assert(!delayed.el('review').hidden);
+  assert(delayed.el('review').innerHTML.includes('class="line deleted">-old'));
+  assert(!delayed.messages.some(x=>x.method==='tools/call'));
+  const restored=delayed.el('review').innerHTML;
+  delayed.events['openai:set_globals']({detail:{globals:{theme:'dark'}}});
+  delayed.deliver({method:'ui/notifications/tool-result',params:{content:[{type:'text',text:JSON.stringify(wrap([command]))}]}});
+  assert.equal(delayed.el('review').innerHTML,restored);
+  // A second instance has independent data; late hydration cannot replace its peer.
+  const peer=boot({mcp_tool_result:wrap([{...command,command:'second operation'}])});
+  assert(peer.el('activity').innerHTML.includes('second operation'));
+  assert(!saved.el('activity').innerHTML.includes('second operation'));
+  // Re-delivery of the same snapshot must not discard expanded or paged UI.
+  delayed.el('review').innerHTML='preserved interaction';
+  delayed.events['openai:set_globals']({detail:{globals:{toolResponseMetadata:{call_tool_result:wrap([patch])}}}});
+  assert.equal(delayed.el('review').innerHTML,'preserved interaction');
   // Optional actual MCP wire metadata from the Python integration test.
   if(process.argv[2]){
     const fixture=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));

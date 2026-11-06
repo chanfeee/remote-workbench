@@ -6,8 +6,9 @@ exercise the bridge without a live ControlMaster we monkeypatch
 ``WorkbenchSSHSession._build_argv`` to run a harmless local command instead.
 """
 
-import asyncssh
 import pytest
+
+asyncssh = pytest.importorskip("asyncssh", reason="install the proxy extra to test the gateway")
 
 from remote_workbench import proxy_key
 from remote_workbench.config import HostConfig

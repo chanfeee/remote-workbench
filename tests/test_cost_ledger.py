@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from remote_workbench.cost_ledger import (
+from scripts.offline.cost_ledger import (
     DuplicateRequestConflict,
     LedgerError,
     build_cost_ledger,

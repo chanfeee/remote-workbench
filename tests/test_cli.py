@@ -14,6 +14,26 @@ from remote_workbench.config import load_config
 from remote_workbench.ssh import SSHExecutor
 
 
+def test_proxy_help_and_missing_extra_do_not_load_gateway(monkeypatch, capsys):
+    from remote_workbench import optional_dependencies
+
+    monkeypatch.setattr(optional_dependencies, "find_spec", lambda name: None)
+    cli._proxy_run(["--help"])
+    assert "Usage: remote-workbench proxy" in capsys.readouterr().out
+    with pytest.raises(SystemExit, match=r"remote-workbench\[proxy\]"):
+        cli._proxy_run([])
+
+
+def test_web_launcher_explains_missing_extra_before_loading_app(monkeypatch):
+    from remote_workbench import optional_dependencies
+    from remote_workbench.web.__main__ import main
+
+    monkeypatch.setattr(optional_dependencies, "find_spec", lambda name: None)
+    monkeypatch.setattr(sys, "argv", ["remote-workbench-web"])
+    with pytest.raises(SystemExit, match=r"remote-workbench\[web\]"):
+        main()
+
+
 @pytest.fixture
 def host_file(tmp_path):
     path = tmp_path / "hosts.yaml"

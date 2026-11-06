@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from remote_workbench.server import mcp, get_executor
+from remote_workbench.tool_runtime import audited_operation, get_executor
 
 
-@mcp.tool()
+@audited_operation
 async def ssh_check_connection(host: str | None = None) -> dict:
     """Check if the SSH ControlMaster connection is alive.
 

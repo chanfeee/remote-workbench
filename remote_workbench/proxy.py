@@ -26,8 +26,8 @@ from pathlib import Path
 import asyncssh
 
 from remote_workbench.config import HostConfig
+from remote_workbench.ssh_config import DEFAULT_PORT
 
-DEFAULT_PORT = 4242
 _READ_SIZE = 65536
 
 

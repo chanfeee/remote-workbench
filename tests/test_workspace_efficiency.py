@@ -10,6 +10,7 @@ from mcp.types import CallToolResult, TextContent
 import pytest
 
 from remote_workbench.ssh import SSHExecutor
+from remote_workbench.audit_web import Handler as AuditViewerHandler
 from remote_workbench import workspace as workspace_module
 from remote_workbench.workspace import Workspace, create_server
 
@@ -26,7 +27,7 @@ def wire_size(result):
 
 def viewer_handler(server_factory):
     handler = server_factory.call_args_list[0].args[1]
-    assert issubclass(handler, workspace_module.AuditViewerHandler)
+    assert issubclass(handler, AuditViewerHandler)
     assert len(handler.viewer_instance_id) == 32
     return handler
 

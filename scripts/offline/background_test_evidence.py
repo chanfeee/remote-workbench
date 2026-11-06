@@ -11,8 +11,9 @@ import os
 from pathlib import Path
 import sqlite3
 
-from remote_workbench import audit, test_evidence
-from remote_workbench.workspace_registry import Registry
+from remote_workbench import audit
+from scripts.offline import test_evidence
+from scripts.offline.evidence_registry import EvidenceRegistry as Registry
 
 def _identity(registry: Registry, executor, origin: dict, handle: dict, record: dict):
     workspace_id = origin.get("workspace_id")

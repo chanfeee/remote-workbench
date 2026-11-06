@@ -30,7 +30,11 @@ from pathlib import Path
 import sys
 from typing import Any
 
-from remote_workbench.cost_ledger import (
+# Direct script execution and package imports use the same source-only helpers.
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from scripts.offline.cost_ledger import (
     LedgerError,
     SCHEMA_VERSION,
     build_cost_ledger,

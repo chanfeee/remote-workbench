@@ -114,7 +114,7 @@ def _proxy_status() -> None:
     import socket as _socket
 
     from remote_workbench import known_hosts, ssh_config
-    from remote_workbench.proxy import DEFAULT_PORT
+    from remote_workbench.ssh_config import DEFAULT_PORT
 
     injected = ssh_config.is_injected()
     registered = known_hosts.is_registered()
@@ -148,7 +148,7 @@ def _proxy_run(rest: list[str]) -> None:
     from pathlib import Path
 
     from remote_workbench.config import load_config
-    from remote_workbench.proxy import DEFAULT_PORT
+    from remote_workbench.ssh_config import DEFAULT_PORT
 
     alias: str | None = None
     config_path: Path | None = None
@@ -212,6 +212,9 @@ def _proxy_run(rest: list[str]) -> None:
                 sys.exit(2)
             alias = a
             i += 1
+
+    from remote_workbench.optional_dependencies import require_extra
+    require_extra("proxy", "asyncssh")
 
     try:
         cfg = load_config(config_path)

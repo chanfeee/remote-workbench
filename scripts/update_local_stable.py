@@ -47,6 +47,7 @@ async def check():
                 resource = await client.read_resource(RESOURCE_URI)
                 assert resource.contents[0].mimeType == 'text/html;profile=mcp-app'
                 assert 'ui/initialize' in resource.contents[0].text
+                assert resource.contents[0].meta['openai/widgetMinFrameHeight'] == 0
                 response = await client.call_tool('workspace_tools', {'tool': 'workspace_info'},
                     meta={'threadId': 'local-install-smoke'})
                 assert not response.isError

@@ -2,9 +2,6 @@
 
 import argparse
 
-import uvicorn
-
-
 def main():
     parser = argparse.ArgumentParser(description="Remote Workbench Web Launcher")
     parser.add_argument("host", nargs="?", default=None, help="Host alias from config")
@@ -12,6 +9,10 @@ def main():
     parser.add_argument("--bind", default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
     parser.add_argument("--no-open", action="store_true", help="Don't auto-open browser")
     args = parser.parse_args()
+
+    from remote_workbench.optional_dependencies import require_extra
+    require_extra("web", "fastapi", "uvicorn", "websockets")
+    import uvicorn
 
     # Configure the app before uvicorn starts it
     import remote_workbench.web.app as web_app

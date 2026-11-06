@@ -23,6 +23,8 @@ cd remote-workbench
 uv sync --frozen
 ```
 
+The SSH MCP and inline cards need only the default installation. Install the optional gateway with `uv sync --frozen --extra proxy`, or the standalone Web/PTY launcher with `uv sync --frozen --extra web` (`python -m remote_workbench.web`). Wheel installations use `remote-workbench[proxy]` or `remote-workbench[web]`. The local audit viewer uses the standard library and remains available separately via `python -m remote_workbench.audit_web`.
+
 ### 2. Configure a server
 
 ```sh
@@ -99,7 +101,9 @@ Version `0.4.2` accepts `exec_command(host=..., cwd=..., command=..., stdin=...)
 
 The `0.4.2` MCP entrypoints no longer start a standalone HTML server, allocate a viewer port, or return browser links. Closing an inline card does not stop execution or remove records. Older stable installations keep their installed behavior until explicitly upgraded.
 
-**Inline operation cards:** `exec_command` and `apply_patch` declare a read-only MCP Apps card for compatible clients. It shows the recorded server, actual cwd, command, process status, and bounded output or managed diff directly in chat. “Continue reading” uses the existing local `read_output` tool through the UI bridge; it does not run another command or ask the model to render the page. Card previews use result `_meta`, leaving model-visible result text unchanged and the catalog at eight tools. The component has no external assets or loopback fetches. In `0.4.3`, command/file rows are visible by default and the card shrinks to its content when output or diff is collapsed. Text-only clients retain ordinary tool results, saved records and CLI access. Stable installations and approval settings are updated separately.
+**Inline operation cards:** `exec_command` and `apply_patch` declare a read-only MCP Apps card for compatible clients. It shows the recorded server, actual cwd, command, process status, and bounded output or managed diff directly in chat. “Continue reading” uses the existing local `read_output` tool through the UI bridge; it does not run another command or ask the model to render the page. Card previews use result `_meta`, leaving model-visible result text unchanged and the catalog at eight tools. The component has no external assets or loopback fetches. In `0.4.4`, command/file rows are visible by default; the resource removes the desktop minimum-height floor so the card can shrink to its content when output or diff is collapsed. Text-only clients retain ordinary tool results, saved records and CLI access. Stable installations and approval settings are updated separately.
+
+Version `0.4.5` preserves independent operation cards in desktop history and restores saved snapshots without replaying commands. Older saved cards without an identity are not rewritten; see [history compatibility and validation](docs/inline-card-history.md). App enable/disable settings remain user-controlled.
 
 To inspect existing local records without the App, use the MCP state directory and workspace ID reported by `workspace_info`:
 
