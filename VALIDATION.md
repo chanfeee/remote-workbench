@@ -1,13 +1,20 @@
 # Validation status
 
-## Runtime simplification (2026-11-06, unreleased)
+## Stable 0.4.5 integration (2026-11-06)
+
+- **869 tests passed in 215.65 seconds, with no skips**, after integrating the runtime simplification and independent inline-card identities. The complete suite used local workers, bounded process supervision, loopback services and simulated SSH, including real MCP stdio restart/recovery tests. No real CERN/IHEP command was run in this integration check.
+- The frozen lockfile check and offline wheel/sdist builds passed. Package inspection confirmed the three new runtime helpers, source-only offline tools, optional Web/proxy dependency markers and no private test/deployment material. Default direct dependencies remain MCP/PyYAML.
+- Card history preserves operation identities, accepts saved/canonical and delayed metadata, and keeps model-visible text and the eight-tool catalog unchanged. The preceding UI-only candidate separately passed all 13 inline tests. The installed desktop's actual coalescing-rule replay reproduced two hidden cards among three saved operations and retained all three with independent identities.
+- Old local records remain readable; previously saved chat messages are not rewritten. Desktop return/reopen rendering, the actual App enable/disable switch, branch CI and the installed runtime are separate acceptance levels. Running MCP processes require reload to use an updated installation; no new whole-agent latency/token result is implied.
+
+## Runtime simplification before stable integration (2026-11-06)
 
 - **868 tests passed in 217.79 seconds** with the complete local suite (`python -m pytest -q --tb=short --durations=8`). Coverage includes operation records, authentication redaction, guarded edits, combined calls, job idempotency/recovery across real MCP stdio restarts, loopback proxy/viewer behavior and inline resources. No real SSH host was used.
 - Sorted serialized tool descriptors are identical before and after the refactor for the session (8), fixed-workspace (20) and legacy SSH (29) catalogs. A fresh-interpreter regression verifies that session/fixed-workspace startup does not load the legacy server, audit viewer or source-only offline tools, even when FastAPI, WebSockets and AsyncSSH are unavailable.
 - Ordinary registries no longer create/migrate historical test tables or expose their writer methods. Existing history reads remain available and tolerate databases without those tables. Historical writers are explicitly accessed through source-only `scripts/offline/evidence_registry.py`; preservation and launch-order tests passed.
 - Offline wheel/sdist builds and the frozen lock check passed. The wheel omits offline helpers and declares only MCP/PyYAML as direct default dependencies; `web` and `proxy` dependencies have extra markers. All third-party lock entries, versions and hashes are unchanged. The runtime Python sources contain 1,337 fewer lines; offline implementations remain available in the source distribution.
 - An extracted wheel completed a real MCP stdio handshake, listed all 8 tools, served the inline HTML resource and returned the installed package path from local workspace metadata, with optional packages blocked. The extracted source distribution's offline ledger CLI also ran independently.
-- Initial sandbox-only regression failures were traced to blocked `ps` and loopback binding; the permitted local suite above passed. Stable installation, existing MCP processes and remote data were not updated. This change does not establish a token or latency improvement.
+- Initial sandbox-only regression failures were traced to blocked `ps` and loopback binding; the permitted local suite above passed. At this earlier refactor-only validation step, stable installation, existing MCP processes and remote data were not updated. This change does not establish a token or latency improvement.
 
 ## Desktop minimum-height follow-up (0.4.4)
 

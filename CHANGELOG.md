@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.5 — runtime simplification and card history
+
+- Separate shared operation auditing and executor selection from legacy MCP registration. Session and fixed-workspace startup no longer construct the legacy SSH tool catalog; all three public catalogs retain their existing schemas.
+- Move the offline cost ledger, historical test-evidence helpers and legacy evidence writers to source-only `scripts/offline/`. Normal registries no longer create or migrate historical test tables; explicit history reads preserve existing records and tolerate fresh databases.
+- Make the standalone Web/PTY launcher and SSH gateway dependencies optional through the `web` and `proxy` extras. Keep default MCP/inline-card startup independent of these packages, load the separate audit viewer only on request, and explain missing extras before starting a feature.
+- Extract session execution, patch follow-up and job reservation from the MCP adapter. Share redacted authentication refusals and remove duplicate retry branches while preserving whole-file writes, substring replacements, patches, guarded edits and original-target job recovery.
+- Give each operation a stable independent inline-card identity so later commands and patches do not replace earlier cards in desktop history. Restore canonical result envelopes and delayed history metadata without re-executing commands or changing model-visible output. Keep older resource URIs readable; previously saved cards without an identity are not rewritten.
+
 ## 0.4.4 — remove the host's inline minimum height
 
 - Set the desktop resource's `openai/widgetMinFrameHeight` to 0 and a compact initial height hint. Intrinsic content reporting alone in 0.4.3 could not override the host's default 200px minimum.

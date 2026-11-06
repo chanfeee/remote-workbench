@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from uuid import uuid4
 
 from mcp.types import CallToolResult
 
@@ -10,7 +11,10 @@ from remote_workbench import audit
 from remote_workbench.presentation import parse_unified_diff, summarize_record
 from remote_workbench.session_context import get_codex_identity
 
-RESOURCE_URI = 'ui://remote-workbench/operation-v6.html'
+RESOURCE_URI = 'ui://remote-workbench/operation-v7.html'
+# Recorded tool calls can still refer to an earlier template after an upgrade.
+HISTORICAL_RESOURCE_URIS = tuple(f'ui://remote-workbench/operation-v{version}.html'
+                                 for version in (2, 4, 5, 6))
 CARD_TOOLS = frozenset({'exec_command', 'apply_patch'})
 PREVIEW_BYTES = 4096
 
@@ -59,23 +63,36 @@ def attach_card(blocks, tool):
         steps = [_step(result, tool)]
         if isinstance(result.get('command_result'), dict):
             steps.append(_step(result['command_result'], 'exec_command'))
-        return CallToolResult(content=list(blocks), _meta={'remote-workbench/operation': {'steps': steps}})
+        # Desktop history otherwise coalesces calls using the same resource
+        # within a turn. Each operation is a separate snapshot, not an update
+        # to the previous command's widget. This is a UI identity only; spool
+        # access still checks the calling chat independently.
+        card_id = steps[0].get('operation_id') or steps[0].get('output_id') or uuid4().hex
+        return CallToolResult(content=list(blocks), _meta={
+            'openai/widgetSessionId': f'remote-workbench:{card_id}',
+            'remote-workbench/operation': {'steps': steps},
+        })
     except (OSError, ValueError, TypeError, KeyError, IndexError, AttributeError):
         return blocks
 
 
 def install(server, router):
     """Attach a static resource and wire-only decorator; no extra model tool."""
-    @server.resource(RESOURCE_URI, mime_type='text/html;profile=mcp-app',
-                     meta={'ui': {'prefersBorder': True,
-                                  'csp': {'connectDomains': [], 'resourceDomains': []}},
-                           'openai/ui': {'availableDisplayModes': ['inline']},
-                           # Supported by the desktop host. Its default 200px
-                           # minimum otherwise overrides smaller size reports.
-                           'openai/widgetMinFrameHeight': 0,
-                           'openai/widgetHeightHint': 96})
     def operation_card() -> str:
         return Path(__file__).with_name('operation_card.html').read_text()
+
+    for uri in (RESOURCE_URI, *HISTORICAL_RESOURCE_URIS):
+        server.resource(uri, mime_type='text/html;profile=mcp-app', meta={
+            'ui': {'prefersBorder': True,
+                   'csp': {'connectDomains': [], 'resourceDomains': []}},
+            'openai/ui': {'availableDisplayModes': ['inline']},
+            # Keep command/file rows visible when revisiting a chat. Output
+            # and diff details remain collapsed inside the compact card.
+            'openai/widgetShowCodexWidgetInline': True,
+            # The desktop default 200px minimum overrides smaller size reports.
+            'openai/widgetMinFrameHeight': 0,
+            'openai/widgetHeightHint': 96,
+        })(operation_card)
 
     for name in CARD_TOOLS:
         server._tool_manager.get_tool(name).meta = {'ui': {'resourceUri': RESOURCE_URI},

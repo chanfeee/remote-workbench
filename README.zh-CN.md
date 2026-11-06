@@ -23,6 +23,8 @@ cd remote-workbench
 uv sync --frozen
 ```
 
+SSH MCP 和内联卡片只需默认安装。代理网关按需使用 `uv sync --frozen --extra proxy`，独立 Web/PTY 启动器使用 `uv sync --frozen --extra web`（启动命令为 `python -m remote_workbench.web`）；wheel 安装对应 `remote-workbench[proxy]` 或 `remote-workbench[web]`。本地审计网页使用标准库，仍可通过 `python -m remote_workbench.audit_web` 独立启动。
+
 ### 2. 配置服务器
 
 ```sh
@@ -100,6 +102,8 @@ Session 路由依赖客户端提供 `_meta.threadId`；缺少可用的聊天身�
 `0.4.2` 的 MCP 入口不再启动独立 HTML 服务、不分配查看页端口，也不返回网页链接。关闭内联卡片不影响执行，也不会删除记录。旧 stable 安装在明确升级前保留原有行为。
 
 **内联操作卡片：** `exec_command` 和 `apply_patch` 声明只读 MCP Apps 卡片，兼容客户端可在聊天中直接显示记录的服务器、实际 cwd、命令、进程状态、有界输出或受管 diff。“继续读取”通过 UI 桥接调用已有的本地 `read_output`，不重新执行命令，也不需要模型渲染页面。预览放在结果 `_meta` 中，模型可见的结果文本不变，工具目录仍为 8 项。组件不加载外部资源，也不请求本机 HTTP 页面。`0.4.4` 默认显示命令／文件行，并在资源元数据中去除桌面的最低高度限制，使收起输出或 diff 时卡片能按实际内容缩小。不支持内联组件的客户端保留普通工具结果、本地记录和 CLI 查询。独立 stable 安装和审批设置另行更新。
+
+`0.4.5` 为各次操作保留独立卡片，并从保存的结果恢复显示，不重新执行命令。缺少标识的旧卡片不会被改写，兼容范围及验收状态见[历史卡片说明](docs/inline-card-history.md)。App 的启停开关仍由用户控制。
 
 关闭 App 后，仍可使用 `workspace_info` 中的本地状态目录和 workspace ID 查看已有记录：
 
