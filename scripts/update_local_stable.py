@@ -21,12 +21,12 @@ import uuid
 
 
 SMOKE = r'''
-import asyncio, json, re, sys, tempfile
+import asyncio, json, sys, tempfile
 from pathlib import Path
-from urllib.request import build_opener, ProxyHandler
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 import remote_workbench
+from remote_workbench.inline_app import RESOURCE_URI
 
 release, config, version = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
 assert remote_workbench.__version__ == version
@@ -41,6 +41,12 @@ async def check():
                 await client.initialize()
                 tools = await client.list_tools()
                 assert len(tools.tools) == 8
+                by_name = {tool.name: tool for tool in tools.tools}
+                for name in ('exec_command', 'apply_patch'):
+                    assert by_name[name].meta['ui']['resourceUri'] == RESOURCE_URI
+                resource = await client.read_resource(RESOURCE_URI)
+                assert resource.contents[0].mimeType == 'text/html;profile=mcp-app'
+                assert 'ui/initialize' in resource.contents[0].text
                 response = await client.call_tool('workspace_tools', {'tool': 'workspace_info'},
                     meta={'threadId': 'local-install-smoke'})
                 assert not response.isError
@@ -48,11 +54,11 @@ async def check():
                 assert info['mode'] == 'local' and not info['bound']
                 assert info['runtime']['version'] == version
                 assert Path(info['runtime']['package_path']).resolve().is_relative_to(release)
-                url = re.search(r'\]\((http[^)]+)\)', info['operation_log'])[1]
-                with build_opener(ProxyHandler({})).open(url, timeout=5) as page:
-                    assert page.status == 200 and b'Remote Workbench' in page.read()
+                assert info['write_coordination'] == 'managed-files'
+                assert 'operation_log' not in info
+                assert not (Path(state) / 'resources.sqlite3').exists()
 asyncio.run(check())
-print('Installed imports, MCP stdio and local viewer passed; no SSH was used.')
+print('Installed imports, MCP stdio and inline resource passed; no SSH was used.')
 '''
 
 
@@ -91,7 +97,7 @@ def activate(root, release):
 
 
 def smoke(release, config, version):
-    print('Checking installed MCP and viewer...', flush=True)
+    print('Checking installed MCP and inline resource...', flush=True)
     run([release / 'venv/bin/python', '-I', '-c', SMOKE, release, config, version], timeout=60)
 
 
