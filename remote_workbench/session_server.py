@@ -31,7 +31,7 @@ from remote_workbench import baseline
 from remote_workbench.call_arguments import selected_files, validate_output_budget
 from remote_workbench.edit_spec import PreparedEdit
 from remote_workbench.command_spec import Command, normalize_arguments
-from remote_workbench.tool_interface import INSTRUCTIONS, READ_ONLY_TOOL_NAMES, TOOL_NAMES, present_result
+from remote_workbench.tool_interface import COMMAND_BATCH_GUIDANCE, INSTRUCTIONS, READ_ONLY_TOOL_NAMES, TOOL_NAMES, present_result
 
 # Read-only checks and controls must remain available while a foreground
 # command owns the workspace lease. Remote checks may observe intermediate
@@ -573,7 +573,8 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
             structured_apply_patch.__name__ = "apply_patch"
             structured_apply_patch.__doc__ = (
                 "Apply local-style context patches (Add/Delete supported) or unified diffs. Optional edits use guarded snapshots; pass patch or edits. "
-                "command runs shell/argv/batch checks after success. read_files/edit_files explicitly return files after edits/checks; edit_files includes fresh guarded IDs. "
+                "Include already-known post-edit checks in command={commands:[argv,...]} for one edit/check result; shell text/argv also work. "
+                "read_files/edit_files explicitly return files after edits/checks; edit_files includes fresh guarded IDs. "
                 "check_only cannot run command. Full patch/diff is recorded.")
             server.tool(structured_output=False)(structured_apply_patch)
             tool_metadata = server._tool_manager.get_tool("apply_patch")
@@ -601,7 +602,7 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
 
     for name, function, description in TOOLS:
         if name == 'exec_command':
-            description = ('Run shell text, argv or {commands:[argv,...]} in the selected directory. '
+            description = (COMMAND_BATCH_GUIDANCE +
                 'Optional host + absolute cwd binds and runs together; repeat the same target without rebinding. '
                 'read_files/edit_files return selected files after confirmed completion, including nonzero exits; edit_files includes guarded edit_ids. '
                 'Paths use the command cwd; max_bytes applies to command/per file. stdin is exact text. '
@@ -651,7 +652,7 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
             raise ToolError("Unknown argument names: " + ", ".join(sorted(unknown)))
         return await schemas[tool].run(arguments, context=ctx)
     from remote_workbench.inline_app import install as install_inline_app
-    install_inline_app(server, router)
+    install_inline_app(server)
     return server
 
 

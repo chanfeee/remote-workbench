@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.6 — native text results
+
+- Stop binding HTML templates to commands and managed edits. New operations return ordinary MCP text, without creating custom widgets, generating preview copies or reading audit files for UI decoration. Full output/diff records and the eight-tool interface remain available.
+- Tell callers to prefer one batch for already-known commands in the same directory, and to include known post-edit checks in `apply_patch.command`. A batch retains every step's output and exit code in one native result; independent requests are not merged after submission.
+- Keep old card resources readable on demand, with forced inline display disabled. Existing records and saved card data are not deleted or replayed. Installed-version checks now verify native text by default and historical resources separately.
+- For historical views only, pause offscreen/hidden card drawing and layout observation, retain only the latest pending snapshot, and batch visible updates and height reports per animation frame. Keep the initialization handshake eager for hosts that hide views until connected.
+- Build command output and colored diff nodes only when their details are opened; release those nodes when collapsed while preserving locally paged data. Repeated host metadata no longer mutates or discards the paged view.
+- Retain v8 and earlier resources for saved cards, including their historical identities. New operations allocate no widget identities; model-visible result text and the eight-tool interface remain unchanged.
+
 ## 0.4.5 — runtime simplification and card history
 
 - Separate shared operation auditing and executor selection from legacy MCP registration. Session and fixed-workspace startup no longer construct the legacy SSH tool catalog; all three public catalogs retain their existing schemas.

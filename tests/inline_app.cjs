@@ -9,7 +9,7 @@ const tick = ()=>new Promise(resolve=>setImmediate(resolve));
 function boot(initial) {
   const elements=new Map(),messages=[],timers=new Map(),events={};
   let contentHeight=120,observer;
-  const el=id=>{if(!elements.has(id))elements.set(id,{innerHTML:'',textContent:'',hidden:false,handlers:{},getBoundingClientRect(){return {height:contentHeight};},addEventListener(name,fn){this.handlers[name]=fn;}});return elements.get(id);};
+  const el=id=>{if(!elements.has(id))elements.set(id,{innerHTML:'',textContent:'',hidden:false,handlers:{},removeAttribute(){},getBoundingClientRect(){return {height:contentHeight};},addEventListener(name,fn){this.handlers[name]=fn;}});return elements.get(id);};
   const parent={postMessage:message=>messages.push(message)};
   let serial=0;
   const context={Map,Set,JSON,Number,Array,Object,Boolean,String,Error,Promise,
@@ -19,7 +19,9 @@ function boot(initial) {
     setTimeout:fn=>{timers.set(++serial,fn);return serial;},clearTimeout:id=>timers.delete(id)};
   vm.runInNewContext(source,context);
   const deliver=message=>events.message({source:parent,data:{jsonrpc:'2.0',...message}});
-  return {el,messages,events,parent,deliver,measure(height){contentHeight=height;observer();}};
+  return {el,messages,events,parent,deliver,
+    toggle(root,id,open=true){el(root).handlers.toggle({target:{dataset:{detail:id},open}});return el(id);},
+    measure(height){contentHeight=height;observer([{contentRect:{height}}]);}};
 }
 const wrap=steps=>({_meta:{'remote-workbench/operation':{steps}}});
 const hostile='<img src=x onerror=alert(1)>';
@@ -48,13 +50,27 @@ const command={tool:'exec_command',host:'server',cwd:'/run',command:hostile,stat
   // The host's 1800px viewport must not become a minimum after collapse.
   app.measure(96);assert.equal(sizes().at(-1).params.height,96);
   assert(sizes().every(x=>x.params.height<1800));
+  const outputBody=app.toggle('activity','rwb-detail-0-command');
+  assert(outputBody.innerHTML.includes('&lt;img src=x onerror=alert(1)&gt;'));
   const button={dataset:{step:'0',stream:'stdout'},disabled:false,hidden:false};
+  const originalStream=JSON.stringify(command.streams);
   const click=activity.handlers.click({target:{closest:()=>button}});await tick();
   const call=app.messages.find(x=>x.method==='tools/call');
   assert.equal(call.params.name,'read_output');assert.equal(call.params.arguments.cursor,10);
   app.deliver({id:call.id,result:{content:[{type:'text',text:JSON.stringify({content:'next',next_cursor:14,truncated:false})}]}});
   await click;
   assert.equal(app.el('rwb-output-0-stdout').textContent,hostile+'next');assert(button.hidden);
+  app.toggle('activity','rwb-detail-0-command',false);
+  assert.equal(outputBody.innerHTML,'');
+  app.toggle('activity','rwb-detail-0-command');
+  assert(outputBody.innerHTML.includes('&lt;img src=x onerror=alert(1)&gt;next'));
+  assert(!outputBody.innerHTML.includes('继续读取'));
+  assert.equal(JSON.stringify(command.streams),originalStream);
+  const commandMarkup=activity.innerHTML;
+  activity.innerHTML='preserved paged view';
+  app.deliver({method:'ui/notifications/tool-result',params:wrap([command])});
+  assert.equal(activity.innerHTML,'preserved paged view');
+  activity.innerHTML=commandMarkup;
   assert(app.messages.every(x=>!['ui/message','ui/update-model-context'].includes(x.method)));
   assert(app.messages.filter(x=>x.method==='tools/call').every(x=>x.params.name==='read_output'));
 
@@ -67,8 +83,12 @@ const command={tool:'exec_command',host:'server',cwd:'/run',command:hostile,stat
   assert(!review.hidden&&activity.hidden);
   assert(review.innerHTML.includes('预览 · 1 个远程文件'));
   assert(review.innerHTML.includes('class="file-change"'));
-  assert(review.innerHTML.includes('class="line added">+&lt;img'));
-  assert(review.innerHTML.includes('class="line deleted">-old'));
+  assert(!review.innerHTML.includes('class="line added"'));
+  const diffBody=app.toggle('review','rwb-detail-0-file-0');
+  assert(diffBody.innerHTML.includes('class="line added">+&lt;img'));
+  assert(diffBody.innerHTML.includes('class="line deleted">-old'));
+  app.toggle('review','rwb-detail-0-file-0',false);
+  assert.equal(diffBody.innerHTML,'');
   assert(review.innerHTML.includes('class="add">+1'));
   for(const text of ['history','operation ','本次操作快照','进程结果','完整历史','CLI'])assert(!review.innerHTML.includes(text),text);
   const previous=review.innerHTML;
@@ -103,7 +123,8 @@ const command={tool:'exec_command',host:'server',cwd:'/run',command:hostile,stat
 
   const partial={...patch,check_only:false,diff_summary:{...patch.diff_summary,complete:false},streams:{diff:{content:diff,next_cursor:90,truncated:true}}};
   app.deliver({method:'ui/notifications/tool-result',params:wrap([partial])});
-  assert(review.innerHTML.includes('（片段）')&&review.innerHTML.includes('data-stream="diff"'));
+  assert(review.innerHTML.includes('（片段）'));
+  assert(app.toggle('review','rwb-detail-0-diff').innerHTML.includes('data-stream="diff"'));
   // Metadata bootstrap can show a saved card with no additional model request.
   const saved=boot(wrap([command])._meta);
   assert(saved.el('activity').innerHTML.includes('命令 <span class="section-count">1</span>'));
@@ -119,7 +140,7 @@ const command={tool:'exec_command',host:'server',cwd:'/run',command:hostile,stat
   const delayed=boot();
   delayed.events['openai:set_globals']({detail:{globals:{toolResponseMetadata:{call_tool_result:wrap([patch])}}}});
   assert(!delayed.el('review').hidden);
-  assert(delayed.el('review').innerHTML.includes('class="line deleted">-old'));
+  assert(delayed.toggle('review','rwb-detail-0-file-0').innerHTML.includes('class="line deleted">-old'));
   assert(!delayed.messages.some(x=>x.method==='tools/call'));
   const restored=delayed.el('review').innerHTML;
   delayed.events['openai:set_globals']({detail:{globals:{theme:'dark'}}});

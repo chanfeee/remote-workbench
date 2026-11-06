@@ -7,6 +7,7 @@
 html,body{margin:0;min-height:0;height:auto}
 body{background:var(--bg);color:var(--text);font:13px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
 #content{display:flow-root;min-width:0}
+#content[data-pending]{min-height:96px}
 [hidden]{display:none!important}
 .card{width:100%;min-width:0;overflow:hidden}
 .header{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 12px;padding:9px 12px;border-bottom:1px solid var(--border)}
@@ -57,7 +58,7 @@ summary:focus-visible,button:focus-visible{outline:2px solid var(--blue);outline
 button{margin:6px 0 0;padding:4px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text);font:inherit;font-size:11px;line-height:1.4;cursor:pointer}
 button:disabled{opacity:.6;cursor:default}
 @media(max-width:520px){.item>details>summary{grid-template-columns:10px 14px minmax(0,1fr);gap:5px 7px}.metric{grid-column:3}.detail{padding-left:43px}.header{gap:3px 8px}.workspace{font-size:10.5px}}
-</style></head><body><div id="content"><section class="review-view"><main class="card" id="review" aria-live="polite" hidden></main></section>
+</style></head><body><div id="content" data-pending><section class="review-view"><main class="card" id="review" aria-live="polite" hidden></main></section>
 <section class="activity-view"><main class="card" id="activity" aria-live="polite" hidden></main></section><div id="error" role="status" hidden></div></div>
 <script>
 (() => {
@@ -109,7 +110,7 @@ button:disabled{opacity:.6;cursor:default}
         return;
       }
       const files = Array.isArray(payload.files) ? payload.files : [];
-      const rows = files.map((file) => {
+      const rows = files.map((file, index) => {
         const path = file.path || "(unknown)";
         const added = Number.isInteger(file.additions) ? file.additions : "–";
         const deleted = Number.isInteger(file.deletions) ? file.deletions : "–";
@@ -120,16 +121,20 @@ button:disabled{opacity:.6;cursor:default}
         const fileDiff = file.diff || "";
         if (!fileDiff) return `<li class="file-row">${row}</li>`;
         const truncated = file.diff_truncated ? "（已截断）" : "";
-        return `<li class="file-item"><details class="file-change">
+        const detailId = `rwb-detail-${payload.step_index}-file-${index}`;
+        return `<li class="file-item"><details class="file-change" data-detail="${detailId}">
           <summary class="file-row">${row}</summary>
-          <pre aria-label="${escapeHtml(path)} diff">${diffLines(fileDiff)}</pre>
-          ${truncated ? `<div class="file-meta">${truncated}</div>` : ""}
+          ${lazyBody(detailId, () => `<pre aria-label="${escapeHtml(path)} diff">${diffLines(fileDiff)}</pre>${truncated ? `<div class="file-meta">${truncated}</div>` : ""}`)}
         </details></li>`;
       }).join("");
       const fileCount = Number.isInteger(payload.files_changed) ? payload.files_changed : files.length;
       const diff = payload.diff || "";
       const hasPerFileDiff = files.some((file) => Boolean(file.diff));
-      const details = diff && !hasPerFileDiff ? `<details class="aggregate-diff"><summary>查看逐行 diff${payload.diff_truncated ? "（已截断）" : ""}</summary><pre id="rwb-output-${payload.step_index}-diff">${diffLines(diff)}</pre>${moreButton(payload.step_index, "diff", payload.diff_truncated)}</details>` : "";
+      const detailId = `rwb-detail-${payload.step_index}-diff`;
+      const details = diff && !hasPerFileDiff ? `<details class="aggregate-diff" data-detail="${detailId}"><summary>查看逐行 diff${payload.diff_truncated ? "（已截断）" : ""}</summary>${lazyBody(detailId, () => {
+        const data = steps[payload.step_index]?.streams?.diff;
+        return `<pre id="rwb-output-${payload.step_index}-diff">${diffLines(data?.content ?? diff)}</pre>${moreButton(payload.step_index, "diff", data?.truncated ?? payload.diff_truncated)}`;
+      })}</details>` : "";
       const foot = payload.files_truncated ? `<div class="foot">文件列表已截断</div>` : "";
       root.innerHTML = `
         <header class="header">
@@ -159,18 +164,22 @@ button:disabled{opacity:.6;cursor:default}
       const status=outcome(item);
       const success = !['failed','timeout'].includes(status.kind);
       const warning = status.kind!=='complete'||Boolean(item.truncated);
-      const stdout = item.stdout ? `<div class="detail-line">标准输出${item.stdout_truncated ? "（截断）" : ""}</div><pre id="rwb-output-${item.step_index}-stdout">${escapeHtml(item.stdout)}</pre>${moreButton(item.step_index, "stdout", item.stdout_truncated)}` : "";
-      const stderr = item.stderr ? `<div class="detail-line">标准错误${item.stderr_truncated ? "（截断）" : ""}</div><pre class="stderr" id="rwb-output-${item.step_index}-stderr">${escapeHtml(item.stderr)}</pre>${moreButton(item.step_index, "stderr", item.stderr_truncated)}` : "";
-      return `<li class="item"><details>
+      const detailId = `rwb-detail-${item.step_index}-command`;
+      return `<li class="item"><details data-detail="${detailId}">
         <summary>
           <span class="state ${statusClass(success, warning)}">${statusMark(success, warning)}</span>
           <span class="command"><span class="primary">${escapeHtml(commandText(item))}</span>
             ${item.show_cwd ? `<span class="secondary">${escapeHtml(item.cwd || "")}</span>` : ""}</span>
           <span class="metric">exit ${item.exit_code ?? "–"} · ${elapsed(item.elapsed_ms)}${['complete','failed'].includes(status.kind)?'':' · '+status.label}</span>
         </summary>
-        <div class="detail">
-          ${stdout}${stderr}${item.error ? `<pre class="stderr">${escapeHtml(item.error)}</pre>` : ""}
-        </div>
+        ${lazyBody(detailId, () => {
+          const streams = steps[item.step_index]?.streams || {};
+          const output = ['stdout', 'stderr'].map(stream => {
+            const data = streams[stream];
+            return data?.content ? `<div class="detail-line">${stream === 'stdout' ? '标准输出' : '标准错误'}${data.truncated ? '（截断）' : ''}</div><pre${stream === 'stderr' ? ' class="stderr"' : ''} id="rwb-output-${item.step_index}-${stream}">${escapeHtml(data.content)}</pre>${moreButton(item.step_index, stream, data.truncated)}` : '';
+          }).join('');
+          return output + (item.error ? `<pre class="stderr">${escapeHtml(item.error)}</pre>` : '');
+        }, 'detail')}
       </details></li>`;
     };
 
@@ -208,23 +217,84 @@ button:disabled{opacity:.6;cursor:default}
   const activityRoot=document.getElementById('activity');
   const errorRoot=document.getElementById('error');
   const contentRoot=document.getElementById('content');
-  const pending=new Map();
-  let serial=0,generation=0,steps=[],lastPayload;
+  const pending=new Map(),detailViews=new Map(),mountedDetails=new Set();
+  let serial=0,generation=0,steps=[],lastPayload,queuedPayload;
+  let eventSerial=0,payloadEvent=0,errorEvent=0,queuedError,lastError='';
+  let visible=typeof IntersectionObserver!=='function',frame=null,flushing=false;
+  let needsResize=false,observedHeight,lastHeight,observing=false,readyPromise;
+  let viewportWidth=window.innerWidth;
+  const active=()=>visible&&!document.hidden;
   const notify=(method,params)=>window.parent.postMessage({jsonrpc:'2.0',method,params},'*');
-  let lastHeight;
-  const resize=()=>{
-    // The document scroll height is at least the host iframe's height. Using
-    // it feeds that height back to the host and prevents a collapsed card
-    // from shrinking. Measure only the intrinsic content, including errors.
-    const height=Math.max(1,Math.ceil(contentRoot.getBoundingClientRect().height));
-    if(height!==lastHeight){lastHeight=height;notify('ui/notifications/size-changed',{height});}
-  };
+  function schedule(){
+    if(!active()||frame!==null||flushing)return;
+    if(typeof requestAnimationFrame==='function')frame=requestAnimationFrame(flush);
+    else flush();
+  }
+  function resize(height){
+    if(!active())return;
+    observedHeight=Number.isFinite(height)?height:undefined;needsResize=true;schedule();
+  }
+  function flush(){
+    frame=null;if(!active())return;flushing=true;
+    try{
+      if(queuedPayload){
+        const payload=queuedPayload;queuedPayload=undefined;
+        if(paint(payload)&&errorEvent<=payloadEvent)queuedError='';
+      }
+      if(queuedError!==undefined){
+        if(queuedError!==lastError){
+          errorRoot.textContent=queuedError;errorRoot.hidden=!queuedError;lastError=queuedError;
+          contentRoot.removeAttribute('data-pending');needsResize=true;observedHeight=undefined;
+        }
+        queuedError=undefined;
+      }
+      if(needsResize){
+        needsResize=false;
+        // A host height echo is not content. Read intrinsic geometry at most
+        // once per animation frame, reusing ResizeObserver's measurement.
+        const height=Math.max(1,Math.ceil(observedHeight ?? contentRoot.getBoundingClientRect().height));
+        observedHeight=undefined;
+        if(height!==lastHeight){lastHeight=height;notify('ui/notifications/size-changed',{height});}
+      }
+    }finally{flushing=false;}
+  }
   const moreButton=(index,stream,truncated)=>truncated?`<button type="button" data-step="${index}" data-stream="${stream}">继续读取</button>`:'';
+  function lazyBody(id,draw,className=''){
+    detailViews.set(id,draw);
+    return `<div id="${id}" class="${className}"></div>`;
+  }
+  function toggleDetail(event){
+    const id=event.target.dataset?.detail,draw=detailViews.get(id);
+    if(draw){
+      const body=document.getElementById(id);
+      if(event.target.open&&!mountedDetails.has(id)){body.innerHTML=draw();mountedDetails.add(id);}
+      else if(!event.target.open&&mountedDetails.delete(id))body.innerHTML='';
+    }
+    resize();
+  }
   function rpc(method,params){return new Promise((resolve,reject)=>{
     const id=++serial,timer=setTimeout(()=>{pending.delete(id);reject(new Error('读取超时'));},15000);
     pending.set(id,{resolve,reject,timer});window.parent.postMessage({jsonrpc:'2.0',id,method,params},'*');
   });}
-  function showError(message){errorRoot.textContent=message;errorRoot.hidden=!message;resize();}
+  function showError(message){queuedError=String(message);errorEvent=++eventSerial;schedule();}
+  function initialize(){
+    if(!readyPromise){
+      readyPromise=rpc('ui/initialize',{appInfo:{name:'Remote Workbench',version:'8.0.0'},appCapabilities:{},protocolVersion:'2026-01-26'})
+        .then(()=>{notify('ui/notifications/initialized',{});resize();})
+        .catch(error=>{readyPromise=undefined;showError(error.message || String(error));throw error;});
+    }
+    return readyPromise;
+  }
+  function activate(){
+    if(active()){
+      viewportWidth=window.innerWidth;
+      if(!observing){observer?.observe(contentRoot);observing=true;}
+      initialize().catch(()=>{});resize();
+    }else{
+      observer?.disconnect();observing=false;
+      if(frame!==null){cancelAnimationFrame(frame);frame=null;}
+    }
+  }
   function operationPayload(result){
     // Live MCP notifications, legacy globals and canonical history snapshots
     // use different envelopes. Inspect only the documented result fields;
@@ -238,10 +308,17 @@ button:disabled{opacity:.6;cursor:default}
   function render(result){
     const payload=operationPayload(result);
     if(!payload)return;
+    queuedPayload=payload;payloadEvent=++eventSerial;schedule();
+  }
+  function paint(payload){
     const serialized=JSON.stringify(payload);
     if(serialized===lastPayload)return;
     lastPayload=serialized;
-    steps=payload.steps;generation++;showError('');
+    // Pagination is local UI state. Do not mutate the host's saved preview,
+    // or a repeated globals event could look like a different snapshot.
+    steps=payload.steps.map(step=>({...step,streams:step.streams&&Object.fromEntries(
+      Object.entries(step.streams).map(([name,data])=>[name,{...data}]))}));
+    generation++;detailViews.clear();mountedDetails.clear();
     const patch=steps.findIndex(s=>s.tool==='apply_patch');
     reviewRoot.hidden=patch<0;
     if(patch>=0){
@@ -261,7 +338,8 @@ button:disabled{opacity:.6;cursor:default}
       truncated:!!(s.streams?.stdout?.truncated||s.streams?.stderr?.truncated)}));
     activityRoot.hidden=!commands.length;
     if(commands.length)activityView.render({success:true,reads:[],commands,host:commands[0].host || '',cwd:commands[0].cwd || '',cwd_count:new Set(commands.map(s=>s.cwd)).size});
-    resize();
+    contentRoot.removeAttribute('data-pending');needsResize=true;observedHeight=undefined;
+    return true;
   }
   async function readMore(event){
     const button=event.target.closest?.('button[data-step]');if(!button||button.disabled)return;
@@ -269,7 +347,7 @@ button:disabled{opacity:.6;cursor:default}
     if(!data||!data.truncated)return;
     const current=generation,cursor=data.next_cursor;button.disabled=true;
     try{
-      await ready;
+      await initialize();
       const response=await rpc('tools/call',{name:'read_output',arguments:{output_id:step.output_id,stream,cursor,max_bytes:4096}});
       if(response.isError)throw new Error(response.content?.[0]?.text || '读取失败');
       const page=response.structuredContent || JSON.parse(response.content.find(x=>x.type==='text').text);
@@ -277,19 +355,23 @@ button:disabled{opacity:.6;cursor:default}
       if(!Number.isInteger(page.next_cursor)||page.next_cursor<cursor||(page.truncated&&page.next_cursor===cursor))throw new Error('读取未推进');
       const pre=document.getElementById(`rwb-output-${index}-${stream}`);
       data.content+=page.content;data.next_cursor=page.next_cursor;data.truncated=page.truncated;
-      if(stream==='diff')pre.innerHTML=reviewView.diffLines(data.content);else pre.textContent=data.content;
+      if(pre){if(stream==='diff')pre.innerHTML=reviewView.diffLines(data.content);else pre.textContent=data.content;}
       button.hidden=!page.truncated;showError('');
     }catch(e){showError(e.message || String(e));}finally{button.disabled=false;resize();}
   }
   reviewRoot.addEventListener('click',readMore);activityRoot.addEventListener('click',readMore);
-  reviewRoot.addEventListener('toggle',resize,true);activityRoot.addEventListener('toggle',resize,true);
-  window.addEventListener('resize',resize);
-  // History hydration may arrive after the iframe's script has started.
+  reviewRoot.addEventListener('toggle',toggleDetail,true);activityRoot.addEventListener('toggle',toggleDetail,true);
+  window.addEventListener('resize',()=>{
+    if(!active()||window.innerWidth===viewportWidth)return;
+    viewportWidth=window.innerWidth;resize();
+  });
+  // History hydration is cheap while offscreen: retain only the newest payload.
   window.addEventListener('openai:set_globals',event=>{
     const globals=event.detail?.globals;
     if(globals?.toolResponseMetadata)render(globals.toolResponseMetadata);
   });
-  if(typeof ResizeObserver==='function')new ResizeObserver(resize).observe(contentRoot);
+  const observer=typeof ResizeObserver==='function'?new ResizeObserver(entries=>resize(entries[0]?.contentRect?.height)):null;
+  document.addEventListener?.('visibilitychange',activate);
   window.addEventListener('message',event=>{
     if(event.source!==window.parent||event.data?.jsonrpc!=='2.0')return;
     const message=event.data,request=pending.get(message.id);
@@ -297,10 +379,13 @@ button:disabled{opacity:.6;cursor:default}
     else if(message.method==='ui/notifications/tool-result')render(message.params);
     else if(message.method==='ui/notifications/tool-cancelled')showError('调用已取消；远端状态待确认');
   });
+  // Complete the protocol handshake even offscreen: some hosts keep a view
+  // hidden until initialized. Visibility gates drawing, not connection setup.
+  initialize().catch(()=>{});
   const initial=window.openai?.toolResponseMetadata;if(initial)render(initial);
-  const ready=rpc('ui/initialize',{appInfo:{name:'Remote Workbench',version:'7.0.0'},appCapabilities:{},protocolVersion:'2026-01-26'})
-    .then(()=>{notify('ui/notifications/initialized',{});resize();});
-  ready.catch(e=>showError(e.message || String(e)));
+  if(typeof IntersectionObserver==='function'){
+    new IntersectionObserver(entries=>{visible=entries[0].isIntersecting;activate();},{rootMargin:'256px 0px'}).observe(contentRoot);
+  }else activate();
 
 })();
 </script></body></html>

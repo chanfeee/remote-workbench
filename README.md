@@ -9,7 +9,7 @@ Remote Workbench gives a local agent command and file access to an explicitly se
 - Switch between local work and several remote servers, with independent bindings for each chat.
 - Read and edit files with conflict checks; inspect commands, output, and managed changes.
 - Start, query, stop, and recover background jobs using their original execution locations.
-- View operations in read-only App cards, query saved records from the CLI, and fetch remote images for display in chat.
+- Read native text operation results, query saved records from the CLI, and fetch remote images for display in chat.
 
 ## Quickstart
 
@@ -25,7 +25,7 @@ cd remote-workbench
 uv sync --frozen
 ```
 
-The SSH MCP and inline cards need only the default installation. Install the optional gateway with `uv sync --frozen --extra proxy`, or the standalone Web/PTY launcher with `uv sync --frozen --extra web` (`python -m remote_workbench.web`). Wheel installations use `remote-workbench[proxy]` or `remote-workbench[web]`. The local audit viewer uses the standard library and remains available separately via `python -m remote_workbench.audit_web`.
+The SSH MCP, native text results and historical-card compatibility need only the default installation. Install the optional gateway with `uv sync --frozen --extra proxy`, or the standalone Web/PTY launcher with `uv sync --frozen --extra web` (`python -m remote_workbench.web`). Wheel installations use `remote-workbench[proxy]` or `remote-workbench[web]`. The local audit viewer uses the standard library and remains available separately via `python -m remote_workbench.audit_web`.
 
 ### 2. Configure a server
 
@@ -103,9 +103,9 @@ Version `0.4.2` accepts `exec_command(host=..., cwd=..., command=..., stdin=...)
 
 The `0.4.2` MCP entrypoints no longer start a standalone HTML server, allocate a viewer port, or return browser links. Closing an inline card does not stop execution or remove records. Older stable installations keep their installed behavior until explicitly upgraded.
 
-**Inline operation cards:** `exec_command` and `apply_patch` declare a read-only MCP Apps card for compatible clients. It shows the recorded server, actual cwd, command, process status, and bounded output or managed diff directly in chat. “Continue reading” uses the existing local `read_output` tool through the UI bridge; it does not run another command or ask the model to render the page. Card previews use result `_meta`, leaving model-visible result text unchanged and the catalog at eight tools. The component has no external assets or loopback fetches. In `0.4.4`, command/file rows are visible by default; the resource removes the desktop minimum-height floor so the card can shrink to its content when output or diff is collapsed. Text-only clients retain ordinary tool results, saved records and CLI access. Stable installations and approval settings are updated separately.
+**Native text results (0.4.6 default):** `exec_command` and `apply_patch` return ordinary MCP text, without an HTML template, independent widget or duplicated card preview. The client displays its native tool entry. Full command output and managed diffs remain in local records and are available through `read_output`; the catalog stays at eight tools.
 
-Version `0.4.5` preserves independent operation cards in desktop history and restores saved snapshots without replaying commands. Older saved cards without an identity are not rewritten; see [history compatibility and validation](docs/inline-card-history.md). App enable/disable settings remain user-controlled.
+Previously released `0.4.5` used independent inline cards. Their saved resources remain readable on demand without requesting automatic inline display. Upgrading does not delete old operations or replay commands. See [text and history compatibility](docs/inline-card-history.md). Existing installations keep their behavior until explicitly updated and reloaded; App enable/disable settings remain user-controlled.
 
 To inspect existing local records without the App, use the MCP state directory and workspace ID reported by `workspace_info`:
 
@@ -119,7 +119,7 @@ This command reads existing local files only. It does not open SSH or start a we
 
 Managed edits record their own changes. Git diff is an explicitly requested view of current differences; the record does not track every file written by arbitrary shell commands or external terminals.
 
-The inline frontend reuses liteRemote's activity and file-review components: command/exit/time facts, per-file additions/deletions, and expandable colored diffs. A zero exit does not override unknown remote completion/cleanup; refused execution and pending cancellation have separate labels. Explanatory footers, visible record IDs, repeated command labels and empty groups are omitted. Stable 0.4.5 was loaded in the actual App and exercised through real SSH; the user confirmed that two command cards and two diff cards remained after switching chats and returning, with both line diffs expandable. Full App restart and UI pagination remain separate acceptance cases. No near-local token/time result is implied.
+The historical viewer retains command/status facts and escaped diffs. Unknown completion/cleanup, pending cancellation, refused execution and nonzero exits remain distinct in both text records and old previews. The released 0.4.5 card-navigation acceptance is historical evidence, not acceptance of this native-text candidate or an App input-latency claim.
 
 For images, ask the agent to show a remote PNG/JPG or a selected PDF page. `fetch_image` saves a local copy and returns a chat preview reference without putting base64 in MCP text. PDF/SVG previews need the optional local rendering packages:
 

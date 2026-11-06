@@ -25,7 +25,7 @@ from remote_workbench.config import load_config
 from remote_workbench.tool_runtime import workspace_executor
 from remote_workbench.ssh import SSHExecutor
 from remote_workbench.compute_review import REVIEW_INSTRUCTIONS
-from remote_workbench.tool_interface import CALL_SOURCE_INSTRUCTIONS
+from remote_workbench.tool_interface import CALL_SOURCE_INSTRUCTIONS, COMMAND_BATCH_GUIDANCE
 from remote_workbench.call_arguments import validate_call_arguments
 from remote_workbench.tools import commands, files, git, search, patch, audit as audit_tools
 
@@ -87,7 +87,7 @@ class Workspace:
 # Short names and descriptions avoid repeating SSH setup and host parameters in
 # every model-facing schema. Original tool validation/audit code remains shared.
 TOOLS = [
-    ("exec_command", commands.ssh_run, "Execute shell text or an argv array in the remote workspace. Prefer arrays for literal arguments (no shell interpolation); strings support pipes/activation. Fresh account login shell each call; max_bytes bounds output."),
+    ("exec_command", commands.ssh_run, COMMAND_BATCH_GUIDANCE + "Remote workspace; argv arguments are literal, shell text supports pipes/activation. Fresh account login shell each call; max_bytes bounds output."),
     ("read_file", files.ssh_read_file, "Read numbered UTF-8 lines from one path or up to 16 explicit paths in one SSH request. for_edit=true returns per-file edit_ids. offset/limit/max_bytes bound each preview."),
     ("fetch_image", files.ssh_fetch_image, "Fetch a remote PNG/JPG/PDF/SVG to a private local cache. PDF page is 1-based. Show returned image_markdown in chat; paths and metadata only, no base64. PDF/SVG previews require the local images extra."),
     ("write_file", files.ssh_write_file, "Atomically write remote UTF-8 content. Optional expected_sha256 rejects stale edits."),

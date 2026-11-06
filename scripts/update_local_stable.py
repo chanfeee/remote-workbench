@@ -27,6 +27,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 import remote_workbench
 from remote_workbench.inline_app import RESOURCE_URI
+from remote_workbench.tool_interface import COMMAND_BATCH_GUIDANCE
 
 release, config, version = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
 assert remote_workbench.__version__ == version
@@ -42,12 +43,17 @@ async def check():
                 tools = await client.list_tools()
                 assert len(tools.tools) == 8
                 by_name = {tool.name: tool for tool in tools.tools}
-                for name in ('exec_command', 'apply_patch'):
-                    assert by_name[name].meta['ui']['resourceUri'] == RESOURCE_URI
+                assert by_name['exec_command'].description.startswith(COMMAND_BATCH_GUIDANCE)
+                assert 'Include already-known post-edit checks in command=' in by_name['apply_patch'].description
+                for tool in by_name.values():
+                    meta = tool.meta or {}
+                    assert not meta.get('ui', {}).get('resourceUri')
+                    assert 'openai/outputTemplate' not in meta
                 resource = await client.read_resource(RESOURCE_URI)
                 assert resource.contents[0].mimeType == 'text/html;profile=mcp-app'
                 assert 'ui/initialize' in resource.contents[0].text
                 assert resource.contents[0].meta['openai/widgetMinFrameHeight'] == 0
+                assert resource.contents[0].meta['openai/widgetShowCodexWidgetInline'] is False
                 response = await client.call_tool('workspace_tools', {'tool': 'workspace_info'},
                     meta={'threadId': 'local-install-smoke'})
                 assert not response.isError
@@ -59,7 +65,7 @@ async def check():
                 assert 'operation_log' not in info
                 assert not (Path(state) / 'resources.sqlite3').exists()
 asyncio.run(check())
-print('Installed imports, MCP stdio and inline resource passed; no SSH was used.')
+print('Installed imports, native-text MCP stdio and archived resources passed; no SSH was used.')
 '''
 
 

@@ -1,5 +1,15 @@
 # Validation status
 
+## 0.4.6 native-text default (2026-11-06)
+
+- The full local suite covered **885 tests**: 884 passed in 221.72 seconds; the sole failure was an obsolete assertion requiring inline-card wording. That assertion now requires native-text wording while retaining the execution/permission boundaries, and all 10 affected workflow regressions passed in 1.65 seconds. No runtime source changed between these two runs.
+- **63 targeted tests passed in 13.45 seconds** for the subsequent batch-calling guidance change. A new wire-level check runs three commands through one MCP request, receives exactly one native text block without widget metadata, retains all three exit codes, and reads their shared saved output. Batch stop/continue, cancellation, supervision, literal arguments, call syntax and catalog registration also passed using local simulated SSH; no real remote target was used. This validates the batch interface, not automatic merging of independent client calls.
+- **69 targeted tests passed in 45.49 seconds**, including real MCP stdio dispatch, structured inputs, default execution, job recovery across process restart/target switches, installer checks and historical resource compatibility. New tools declare no `ui.resourceUri` or `openai/outputTemplate`; command/edit results contain only ordinary text and no widget metadata or duplicate previews. The eight tool schemas, execution facts, chat-scoped full output and managed diff records are preserved.
+- New operations create **zero custom HTML components**. The UI decoration/preview path and its extra audit reads were removed. Saved card resources remain readable on demand, with automatic inline display disabled. Native text still uses the client's own rendering; this is not a claim that all App rendering disappears.
+- The optional historical viewer retains the earlier bounded-rendering work. In a generated 24-frame opaque-sandbox Chrome comparison, initial DOM nodes were **3,204 → 420**, initial colored diff lines **2,448 → 0**, and layout reads across 80 duplicate event rounds **1,920 → 0**. These numbers apply to old cards opened by the client, not to new native-text results.
+- Historical viewer browser checks retained paged data across collapse, late responses and repeated metadata, and restored cards on scrolling. Wide/narrow dark layouts preserved command **94 → 450 → 94 px** and diff **94 → 225 → 94 px** sizing without overflow; screenshots were inspected.
+- Frozen lock, syntax, wheel/sdist and installed stdio checks passed. These checks use no real SSH operation, change no approval policy and delete no records. Package and installation validation do not establish whole-App input latency; actual App acceptance remains separate.
+
 ## v0.4.5 release preparation (2026-11-06)
 
 - **24 targeted release checks passed**. Tests execute both the explicit-tag and manual-draft shell paths, preserve fixed-candidate checks before/after testing, reject invalid tag refs and verify that a failed draft/asset creation cannot proceed to publication.

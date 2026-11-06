@@ -24,6 +24,12 @@ CALL_SOURCE_INSTRUCTIONS = (
     'Full output/diffs stay local; read_output pages them. Advanced tools: workspace_tools.'
 )
 
+COMMAND_BATCH_GUIDANCE = (
+    'Prefer one {commands:[argv,...]} batch for already-known commands in the same cwd: '
+    'one native result with per-step exits, sequential, stop on error by default. '
+    'Split calls when later arguments depend on earlier output. Shell text and single argv also work. '
+)
+
 # Clients may repeat server instructions in every deferred tool description.
 # Keep shared boundaries here; parameter details belong to each tool's schema.
 INSTRUCTIONS = (
@@ -31,7 +37,7 @@ INSTRUCTIONS = (
     'Native tools stay local; no remote Codex CLI. '
     'Reuse manual SSH authentication; stop on identity/SSH failure, never reauthenticate or fall back locally. '
     'Heavy/parallel compute, scheduler and runtime/spawn tests require prior user confirmation of command/concurrency/environment, then compute_review. '
-    'Read-only inline cards show saved operations. Records cover commands, input/output and managed diffs, not arbitrary shell writes. '
+    'Results use native text. Records cover commands, input/output and managed diffs, not arbitrary shell writes. '
     + CALL_SOURCE_INSTRUCTIONS
 )
 
