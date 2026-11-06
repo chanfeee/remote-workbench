@@ -8,16 +8,18 @@ const source = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 const tick = ()=>new Promise(resolve=>setImmediate(resolve));
 function boot(initial) {
   const elements=new Map(),messages=[],timers=new Map(),events={};
-  const el=id=>{if(!elements.has(id))elements.set(id,{innerHTML:'',textContent:'',hidden:false,handlers:{},addEventListener(name,fn){this.handlers[name]=fn;}});return elements.get(id);};
+  let contentHeight=120,observer;
+  const el=id=>{if(!elements.has(id))elements.set(id,{innerHTML:'',textContent:'',hidden:false,handlers:{},getBoundingClientRect(){return {height:contentHeight};},addEventListener(name,fn){this.handlers[name]=fn;}});return elements.get(id);};
   const parent={postMessage:message=>messages.push(message)};
   let serial=0;
   const context={Map,Set,JSON,Number,Array,Object,Boolean,String,Error,Promise,
-    document:{getElementById:el,documentElement:{scrollHeight:300}},
+    document:{getElementById:el,documentElement:{scrollHeight:1800}},
+    ResizeObserver:class{constructor(fn){observer=fn;}observe(target){assert.equal(target,el('content'));}},
     window:{parent,openai:initial?{toolResponseMetadata:initial}:undefined,addEventListener:(name,fn)=>{events[name]=fn;}},
     setTimeout:fn=>{timers.set(++serial,fn);return serial;},clearTimeout:id=>timers.delete(id)};
   vm.runInNewContext(source,context);
   const deliver=message=>events.message({source:parent,data:{jsonrpc:'2.0',...message}});
-  return {el,messages,events,parent,deliver};
+  return {el,messages,events,parent,deliver,measure(height){contentHeight=height;observer();}};
 }
 const wrap=steps=>({_meta:{'remote-workbench/operation':{steps}}});
 const hostile='<img src=x onerror=alert(1)>';
@@ -31,12 +33,21 @@ const command={tool:'exec_command',host:'server',cwd:'/run',command:hostile,stat
   app.deliver({method:'ui/notifications/tool-result',params:wrap([command])});
   const activity=app.el('activity');
   assert.equal(activity.hidden,false);assert.equal(app.el('review').hidden,true);
-  assert(activity.innerHTML.includes('远程活动'));
+  assert(activity.innerHTML.includes('命令 <span class="section-count">1</span>'));
+  assert(!activity.innerHTML.includes('details class="section"'));
+  assert(!activity.innerHTML.includes('class="counts"'));
   assert(activity.innerHTML.includes('exit 0 · 1.25s'));
   assert(activity.innerHTML.includes('&lt;img src=x onerror=alert(1)&gt;'));
   assert(!activity.innerHTML.includes('<img'));
   for(const text of ['读取 0','修改 0','没有文件读取','完整命令','history','operation ','本次操作快照','CLI'])assert(!activity.innerHTML.includes(text),text);
   assert(!activity.innerHTML.includes(command.operation_id));
+  const sizes=()=>app.messages.filter(x=>x.method==='ui/notifications/size-changed');
+  assert.equal(sizes().at(-1).params.height,120);
+  app.measure(520);assert.equal(sizes().at(-1).params.height,520);
+  const before=sizes().length;app.measure(520);assert.equal(sizes().length,before);
+  // The host's 1800px viewport must not become a minimum after collapse.
+  app.measure(96);assert.equal(sizes().at(-1).params.height,96);
+  assert(sizes().every(x=>x.params.height<1800));
   const button={dataset:{step:'0',stream:'stdout'},disabled:false,hidden:false};
   const click=activity.handlers.click({target:{closest:()=>button}});await tick();
   const call=app.messages.find(x=>x.method==='tools/call');
@@ -95,7 +106,7 @@ const command={tool:'exec_command',host:'server',cwd:'/run',command:hostile,stat
   assert(review.innerHTML.includes('（片段）')&&review.innerHTML.includes('data-stream="diff"'));
   // Metadata bootstrap can show a saved card with no additional model request.
   const saved=boot(wrap([command])._meta);
-  assert(saved.el('activity').innerHTML.includes('远程活动'));
+  assert(saved.el('activity').innerHTML.includes('命令 <span class="section-count">1</span>'));
   assert(!saved.messages.some(x=>x.method==='tools/call'));
   // Optional actual MCP wire metadata from the Python integration test.
   if(process.argv[2]){

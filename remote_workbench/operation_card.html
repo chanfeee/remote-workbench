@@ -1,241 +1,64 @@
 <!doctype html>
 <!-- Frontend reused from liteRemote activity/review UI, AGPL-3.0; see UPSTREAM.md. -->
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Remote Workbench</title><style>:root{
-      color-scheme: light dark;
-      --bg: #ffffff;
-      --surface: #f7f7f8;
-      --border: rgba(31, 35, 40, .13);
-      --text: #202124;
-      --muted: #6f7378;
-      --green: #169b53;
-      --green-bg: rgba(22, 155, 83, .11);
-      --red: #d64545;
-      --red-bg: rgba(214, 69, 69, .10);
-      --blue: #2980b9;
-      --yellow: #a66b00;
-      --yellow-bg: rgba(166, 107, 0, .11);
-    }
-@media (prefers-color-scheme: dark){:root{
-        --bg: #171717;
-        --surface: #222223;
-        --border: rgba(255, 255, 255, .13);
-        --text: #ececec;
-        --muted: #a4a4a6;
-        --green: #42c77b;
-        --green-bg: rgba(66, 199, 123, .13);
-        --red: #ff7070;
-        --red-bg: rgba(255, 112, 112, .12);
-        --blue: #66b8e8;
-        --yellow: #f3bd62;
-        --yellow-bg: rgba(243, 189, 98, .12);
-      }}
-*{ box-sizing: border-box; }
-body{
-      margin: 0;
-      background: var(--bg);
-      color: var(--text);
-      font: 13px/1.45 Inter, ui-sans-serif, system-ui, -apple-system,
-            "Segoe UI", sans-serif;
-    }
-.review-view .card{ width: 100%; overflow: hidden; }
-.review-view .header{
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      min-height: 42px;
-      padding: 8px 12px;
-      border-bottom: 1px solid var(--border);
-    }
-.review-view .title{ font-weight: 620; white-space: nowrap; }
-.review-view .workspace{
-      min-width: 0;
-      overflow: hidden;
-      color: var(--muted);
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-.review-view .totals{ margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.review-view .add{ color: var(--green); }
-.review-view .del{ color: var(--red); }
-.review-view .file-list{ margin: 0; padding: 0; list-style: none; }
-.review-view .file-row{
-      display: grid;
-      grid-template-columns: 18px minmax(0, 1fr) auto;
-      align-items: center;
-      gap: 8px;
-      min-height: 40px;
-      padding: 7px 12px;
-      border-bottom: 1px solid var(--border);
-    }
-.review-view .file-icon{
-      display: grid;
-      place-items: center;
-      width: 18px;
-      height: 18px;
-      border-radius: 4px;
-      color: white;
-      background: var(--blue);
-      font-size: 10px;
-      font-weight: 700;
-    }
-.review-view .file-path{ overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.review-view .stat{ font-variant-numeric: tabular-nums; white-space: nowrap; }
-.review-view details.aggregate-diff{ border-bottom: 1px solid var(--border); }
-.review-view details.aggregate-diff > summary{
-      padding: 9px 12px;
-      color: var(--muted);
-      cursor: pointer;
-      user-select: none;
-    }
-.review-view .file-item{ border-bottom: 1px solid var(--border); }
-.review-view .file-item .file-row{ border-bottom: 0; cursor: pointer; color: var(--text); }
-.review-view .file-item summary::-webkit-details-marker{ display: none; }
-.review-view .file-item summary::marker{ content: ""; }
-.review-view .file-meta{
-      padding: 6px 12px;
-      border-top: 1px solid var(--border);
-      color: var(--muted);
-      font-size: 11px;
-      overflow-wrap: anywhere;
-    }
-.review-view pre{
-      max-height: 420px;
-      margin: 0;
-      overflow: auto;
-      border-top: 1px solid var(--border);
-      background: var(--surface);
-      font: 12px/1.55 "Cascadia Code", "SFMono-Regular", Consolas, monospace;
-    }
-.review-view .line{ display: block; min-height: 1.55em; padding: 0 12px; white-space: pre; }
-.review-view .line.added{ color: var(--green); background: var(--green-bg); }
-.review-view .line.deleted{ color: var(--red); background: var(--red-bg); }
-.review-view .line.meta{ color: var(--muted); }
-.review-view .empty,.review-view .error{ padding: 16px 12px; color: var(--muted); }
-.review-view .error{ color: var(--red); }
-.review-view .foot{ padding: 7px 12px; color: var(--muted); font-size: 11px; }
-:root{
-      color-scheme: light dark;
-      --bg: #ffffff;
-      --surface: #f7f7f8;
-      --border: rgba(31, 35, 40, .13);
-      --text: #202124;
-      --muted: #6f7378;
-      --green: #169b53;
-      --green-bg: rgba(22, 155, 83, .11);
-      --red: #d64545;
-      --red-bg: rgba(214, 69, 69, .10);
-      --yellow: #a66b00;
-      --yellow-bg: rgba(166, 107, 0, .11);
-      --blue: #2980b9;
-    }
-@media (prefers-color-scheme: dark){:root{
-        --bg: #171717;
-        --surface: #222223;
-        --border: rgba(255, 255, 255, .13);
-        --text: #ececec;
-        --muted: #a4a4a6;
-        --green: #42c77b;
-        --green-bg: rgba(66, 199, 123, .13);
-        --red: #ff7070;
-        --red-bg: rgba(255, 112, 112, .12);
-        --yellow: #f3bd62;
-        --yellow-bg: rgba(243, 189, 98, .12);
-        --blue: #66b8e8;
-      }}
-*{ box-sizing: border-box; }
-body{
-      margin: 0;
-      background: var(--bg);
-      color: var(--text);
-      font: 13px/1.45 Inter, ui-sans-serif, system-ui, -apple-system,
-            "Segoe UI", sans-serif;
-    }
-.activity-view .card{ width: 100%; overflow: hidden; }
-.activity-view .header{
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 4px 12px;
-      padding: 10px 12px;
-      border-bottom: 1px solid var(--border);
-    }
-.activity-view .title{ font-weight: 620; }
-.activity-view .workspace{
-      min-width: 0;
-      overflow: hidden;
-      color: var(--muted);
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-.activity-view .status{ grid-row: 1 / span 2; grid-column: 2; align-self: center; color: var(--green); }
-.activity-view .status.failed{ color: var(--red); }
-.activity-view .status.warning{ color: var(--yellow); }
-.activity-view .counts{
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      padding: 9px 12px;
-      border-bottom: 1px solid var(--border);
-    }
-.activity-view .count{ padding: 3px 7px; border-radius: 6px; background: var(--surface); color: var(--muted); }
-.activity-view details.section{ border-bottom: 1px solid var(--border); }
-.activity-view details.section:last-child{ border-bottom: 0; }
-.activity-view details.section > summary{
-      display: flex;
-      align-items: center;
-      gap: 7px;
-      padding: 10px 12px;
-      cursor: pointer;
-      user-select: none;
-      font-weight: 620;
-    }
-.activity-view .section-count{ color: var(--muted); font-weight: 400; }
-.activity-view .list{ margin: 0; padding: 0; list-style: none; }
-.activity-view .item{ border-top: 1px solid var(--border); }
-.activity-view .item > details > summary{
-      display: grid;
-      grid-template-columns: 18px minmax(0, 1fr) auto;
-      align-items: start;
-      gap: 8px;
-      padding: 9px 12px;
-      cursor: pointer;
-    }
-.activity-view .state{ font-weight: 700; color: var(--green); }
-.activity-view .state.failed{ color: var(--red); }
-.activity-view .state.warning{ color: var(--yellow); }
-.activity-view .primary{
-      min-width: 0;
-      overflow-wrap: anywhere;
-      font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
-      font-size: 12px;
-    }
-.activity-view .secondary{ margin-top: 3px; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
-.activity-view .metric{ color: var(--muted); font-size: 11px; white-space: nowrap; text-align: right; }
-.activity-view .detail{ padding: 0 12px 10px 38px; color: var(--muted); font-size: 11px; }
-.activity-view .detail-line{ margin-top: 4px; overflow-wrap: anywhere; }
-.activity-view pre{
-      max-height: 320px;
-      margin: 7px 0 0;
-      overflow: auto;
-      padding: 9px 10px;
-      border-radius: 6px;
-      background: var(--surface);
-      color: var(--text);
-      font: 12px/1.5 "Cascadia Code", "SFMono-Regular", Consolas, monospace;
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-    }
-.activity-view .stderr{ color: var(--red); background: var(--red-bg); }
-.activity-view .warning-note{ color: var(--yellow); background: var(--yellow-bg); }
-.activity-view .empty,.activity-view .error{ padding: 16px 12px; color: var(--muted); }
-.activity-view .error{ color: var(--red); }
-.activity-view .foot{ padding: 8px 12px; color: var(--muted); font-size: 11px; }
-@media (max-width: 520px){.activity-view .item > details > summary{ grid-template-columns: 18px minmax(0, 1fr); }
-.activity-view .metric{ grid-column: 2; text-align: left; }
-.activity-view .detail{ padding-left: 38px; }}
-[hidden]{display:none!important}#error{padding:10px 12px;color:var(--red);font:13px/1.45 system-ui}button{font:inherit;cursor:pointer;margin:6px 0;padding:3px 8px}button:disabled{opacity:.6;cursor:default}
-</style></head><body><section class="review-view"><main class="card" id="review" aria-live="polite" hidden></main></section>
-<section class="activity-view"><main class="card" id="activity" aria-live="polite" hidden></main></section><div id="error" role="status" hidden></div>
+<title>Remote Workbench</title><style>:root{color-scheme:light dark;--bg:#fff;--surface:#f6f7f8;--border:rgba(31,35,40,.13);--text:#202124;--muted:#6f7378;--green:#16834a;--green-bg:rgba(22,155,83,.10);--red:#c63b3b;--red-bg:rgba(214,69,69,.10);--blue:#2980b9;--yellow:#906400}
+@media(prefers-color-scheme:dark){:root{--bg:#171717;--surface:#222223;--border:rgba(255,255,255,.12);--text:#ececec;--muted:#a4a4a6;--green:#42c77b;--green-bg:rgba(66,199,123,.12);--red:#ff8585;--red-bg:rgba(255,112,112,.12);--blue:#66b8e8;--yellow:#f3bd62}}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:0;height:auto}
+body{background:var(--bg);color:var(--text);font:13px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+#content{display:flow-root;min-width:0}
+[hidden]{display:none!important}
+.card{width:100%;min-width:0;overflow:hidden}
+.header{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 12px;padding:9px 12px;border-bottom:1px solid var(--border)}
+.title{font-size:12px;font-weight:600}
+.workspace{grid-column:1/-1;grid-row:2;color:var(--muted);font:11px/1.5 ui-monospace,"SFMono-Regular",Consolas,monospace;overflow-wrap:anywhere}
+.status,.totals{grid-column:2;grid-row:1;align-self:start;font-size:11px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.status,.add{color:var(--green)}
+.failed,.del{color:var(--red)}
+.warning{color:var(--yellow)}
+.section-count{margin-left:4px;color:var(--muted);font-weight:400}
+.list,.file-list{list-style:none;margin:0;padding:0}
+.item+.item,.file-item+.file-item{border-top:1px solid var(--border)}
+summary{cursor:pointer;user-select:none;list-style:none}
+summary::-webkit-details-marker{display:none}
+summary::marker{content:""}
+summary:focus-visible,button:focus-visible{outline:2px solid var(--blue);outline-offset:-3px}
+.item>details>summary{display:grid;grid-template-columns:10px 14px minmax(0,1fr) auto;align-items:start;gap:8px;padding:10px 12px}
+.item>details>summary::before,.file-change>summary::before{content:"›";color:var(--muted);font:17px/18px ui-sans-serif,system-ui}
+.item>details[open]>summary::before,.file-change[open]>summary::before{transform:rotate(90deg)}
+.state{font-size:12px;font-weight:600;color:var(--green)}
+.state.failed{color:var(--red)}
+.state.warning{color:var(--yellow)}
+.command{min-width:0}
+.primary{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.5 ui-monospace,"SFMono-Regular",Consolas,monospace}
+.item>details[open] .primary{display:block;-webkit-line-clamp:unset}
+.secondary{display:block;margin-top:3px;color:var(--muted);font-size:11px;overflow-wrap:anywhere}
+.metric{padding-top:1px;color:var(--muted);font-size:11px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.detail{padding:0 12px 10px 44px;color:var(--muted);font-size:11px}
+.detail:empty{display:none}
+.detail-line{margin-top:5px}
+.activity-view pre{max-height:320px;overflow:auto;margin:5px 0 0;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font:12px/1.5 ui-monospace,"SFMono-Regular",Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
+.activity-view pre.stderr{color:var(--red)}
+.file-row{display:grid;grid-template-columns:18px minmax(0,1fr) auto;align-items:center;gap:8px;min-height:38px;padding:8px 12px}
+.file-change>summary{grid-template-columns:10px 18px minmax(0,1fr) auto}
+.file-icon{display:grid;place-items:center;width:18px;height:18px;border-radius:4px;color:#fff;background:var(--blue);font-size:10px;font-weight:600}
+.file-path{min-width:0;overflow-wrap:anywhere;font-size:12px}
+.stat{white-space:nowrap;font:11px ui-monospace,"SFMono-Regular",Consolas,monospace}
+.file-meta,.foot{padding:6px 12px;color:var(--muted);font-size:11px;overflow-wrap:anywhere}
+.review-view pre{max-height:380px;overflow:auto;margin:0;border-top:1px solid var(--border);background:var(--surface);font:12px/1.55 ui-monospace,"SFMono-Regular",Consolas,monospace}
+.line{display:block;min-height:1.55em;padding:0 12px;white-space:pre}
+.line.added{color:var(--green);background:var(--green-bg)}
+.line.deleted{color:var(--red);background:var(--red-bg)}
+.line.meta{color:var(--muted)}
+.aggregate-diff{border-top:1px solid var(--border)}
+.aggregate-diff>summary{padding:8px 12px;color:var(--muted);font-size:12px}
+.empty,.error,#error{padding:9px 12px;color:var(--muted);overflow-wrap:anywhere}
+.error,#error{color:var(--red)}
+button{margin:6px 0 0;padding:4px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text);font:inherit;font-size:11px;line-height:1.4;cursor:pointer}
+button:disabled{opacity:.6;cursor:default}
+@media(max-width:520px){.item>details>summary{grid-template-columns:10px 14px minmax(0,1fr);gap:5px 7px}.metric{grid-column:3}.detail{padding-left:43px}.header{gap:3px 8px}.workspace{font-size:10.5px}}
+</style></head><body><div id="content"><section class="review-view"><main class="card" id="review" aria-live="polite" hidden></main></section>
+<section class="activity-view"><main class="card" id="activity" aria-live="polite" hidden></main></section><div id="error" role="status" hidden></div></div>
 <script>
 (() => {
   'use strict';
@@ -311,7 +134,7 @@ body{
       root.innerHTML = `
         <header class="header">
           <span class="title">${payload.state_label ? escapeHtml(payload.state_label)+" · " : ""}${payload.check_only ? "预览 · " : ""}${fileCount} 个远程文件${payload.partial ? "（片段）" : ""}</span>
-          <span class="workspace" title="${escapeHtml(payload.host + ":" + payload.cwd)}">${escapeHtml(payload.host)}</span>
+          <span class="workspace">${escapeHtml(payload.host)} · ${escapeHtml(payload.cwd || "")}</span>
           <span class="totals"><span class="add">+${payload.additions ?? 0}</span> <span class="del">-${payload.deletions ?? 0}</span></span>
         </header>
         <ul class="file-list">${rows || '<li class="empty">没有文件变更</li>'}</ul>
@@ -341,8 +164,8 @@ body{
       return `<li class="item"><details>
         <summary>
           <span class="state ${statusClass(success, warning)}">${statusMark(success, warning)}</span>
-          <span><span class="primary">${escapeHtml(commandText(item))}</span>
-            <span class="secondary">${escapeHtml(item.cwd || "")}</span></span>
+          <span class="command"><span class="primary">${escapeHtml(commandText(item))}</span>
+            ${item.show_cwd ? `<span class="secondary">${escapeHtml(item.cwd || "")}</span>` : ""}</span>
           <span class="metric">exit ${item.exit_code ?? "–"} · ${elapsed(item.elapsed_ms)}${['complete','failed'].includes(status.kind)?'':' · '+status.label}</span>
         </summary>
         <div class="detail">
@@ -367,12 +190,11 @@ body{
       const cwdNote = payload.cwd_count > 1 ? ` · ${payload.cwd_count} 个目录` : "";
       root.innerHTML = `
         <header class="header">
-          <span class="title">远程活动</span>
-          <span class="workspace" title="${escapeHtml(payload.host + ":" + payload.cwd)}">${escapeHtml(payload.host)} · ${escapeHtml(payload.cwd || "")}${cwdNote}</span>
+          <span class="title">命令 <span class="section-count">${commands.length}</span></span>
+          <span class="workspace">${escapeHtml(payload.host)} · ${escapeHtml(payload.cwd || "")}${cwdNote}</span>
           <span class="status ${failures ? "failed" : notice ? "warning" : ""}">${statusLabel}</span>
         </header>
-        <div class="counts"><span class="count">执行 ${commands.length} 条命令</span></div>
-        <details class="section"><summary>执行命令 <span class="section-count">${commands.length}</span></summary><ul class="list">${commands.map(renderCommand).join("") || '<li class="empty">没有命令执行</li>'}</ul></details>
+        <ul class="list">${commands.map(item=>renderCommand({...item,show_cwd:payload.cwd_count>1})).join("")}</ul>
         `;
     };
 
@@ -385,10 +207,18 @@ body{
   const reviewRoot=document.getElementById('review');
   const activityRoot=document.getElementById('activity');
   const errorRoot=document.getElementById('error');
+  const contentRoot=document.getElementById('content');
   const pending=new Map();
   let serial=0,generation=0,steps=[];
   const notify=(method,params)=>window.parent.postMessage({jsonrpc:'2.0',method,params},'*');
-  const resize=()=>notify('ui/notifications/size-changed',{height:document.documentElement.scrollHeight});
+  let lastHeight;
+  const resize=()=>{
+    // The document scroll height is at least the host iframe's height. Using
+    // it feeds that height back to the host and prevents a collapsed card
+    // from shrinking. Measure only the intrinsic content, including errors.
+    const height=Math.max(1,Math.ceil(contentRoot.getBoundingClientRect().height));
+    if(height!==lastHeight){lastHeight=height;notify('ui/notifications/size-changed',{height});}
+  };
   const moreButton=(index,stream,truncated)=>truncated?`<button type="button" data-step="${index}" data-stream="${stream}">继续读取</button>`:'';
   function rpc(method,params){return new Promise((resolve,reject)=>{
     const id=++serial,timer=setTimeout(()=>{pending.delete(id);reject(new Error('读取超时'));},15000);
@@ -440,6 +270,8 @@ body{
   }
   reviewRoot.addEventListener('click',readMore);activityRoot.addEventListener('click',readMore);
   reviewRoot.addEventListener('toggle',resize,true);activityRoot.addEventListener('toggle',resize,true);
+  window.addEventListener('resize',resize);
+  if(typeof ResizeObserver==='function')new ResizeObserver(resize).observe(contentRoot);
   window.addEventListener('message',event=>{
     if(event.source!==window.parent||event.data?.jsonrpc!=='2.0')return;
     const message=event.data,request=pending.get(message.id);
@@ -448,7 +280,7 @@ body{
     else if(message.method==='ui/notifications/tool-cancelled')showError('调用已取消；远端状态待确认');
   });
   const initial=window.openai?.toolResponseMetadata;if(initial)render(initial);
-  const ready=rpc('ui/initialize',{appInfo:{name:'Remote Workbench',version:'4.0.0'},appCapabilities:{},protocolVersion:'2026-01-26'})
+  const ready=rpc('ui/initialize',{appInfo:{name:'Remote Workbench',version:'5.0.0'},appCapabilities:{},protocolVersion:'2026-01-26'})
     .then(()=>{notify('ui/notifications/initialized',{});resize();});
   ready.catch(e=>showError(e.message || String(e)));
 
