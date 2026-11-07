@@ -1,8 +1,16 @@
-# Native text and historical cards
+# Batch cards and historical results
 
-## 0.4.6 default: native text
+## 0.4.8 batch cards
 
-New command and managed-patch results have no `ui.resourceUri` or
+Use `exec_batch` for ready command groups, preferably up to eight steps in
+one directory. The tool binds one inline resource per batch and uses the same
+executor and text result as `exec_command`. The card reads that result once,
+draws output and exit codes on expansion, and uses a unique identity for each
+saved batch. `exec_command` and `apply_patch` continue to return native text.
+
+## Native text in 0.4.6 and 0.4.7
+
+Command and managed-patch results in those versions have no `ui.resourceUri` or
 `openai/outputTemplate` binding and no per-operation widget metadata. They use
 ordinary MCP text and the client's native tool history, so a new operation
 requires **zero custom HTML components**. The model-visible text and the eight

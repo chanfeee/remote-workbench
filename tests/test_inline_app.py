@@ -90,6 +90,23 @@ async def test_native_history_retains_independent_results_without_reexecution(pr
         assert page['content'] == expected
 
 
+async def test_batch_card_returns_one_result_with_independent_history(project):
+    _, server, source, _ = project
+    command = {'commands': [['printf', '%s\n', f'step {index}'] for index in range(1, 9)]}
+    card_ids = []
+    for _ in range(2):
+        wire = await wire_call(server, 'a', 'exec_batch', host='a', cwd=str(source), command=command)
+        assert not wire.isError and wire.structuredContent is None
+        assert len(wire.content) == 1 and wire.content[0].type == 'text'
+        result = json.loads(wire.content[0].text)
+        assert result['batch_state'] == 'finished'
+        assert [step['exit_code'] for step in result['steps']] == [0] * 8
+        card_id = f"remote-workbench:batch:{result['operation_id']}"
+        assert wire.meta == {'openai/widgetSessionId': card_id}
+        card_ids.append(card_id)
+    assert len(set(card_ids)) == 2
+
+
 async def test_process_failure_remains_visible_in_text(project):
     _, server, source, _ = project
     text = text_result(await wire_call(server, 'a', 'exec_command', host='a', cwd=str(source),
@@ -159,7 +176,7 @@ async def test_native_text_uses_caller_budget_without_duplicate_preview(project)
     assert len(full['content']) == 9001
 
 
-async def test_stdio_has_no_tool_bound_pages_but_can_read_archived_resources(tmp_path):
+async def test_stdio_binds_only_the_batch_card_and_keeps_archived_resources(tmp_path):
     config = tmp_path / 'hosts.yaml'
     config.write_text('hosts:\n  test:\n    ssh_host: never-connect.invalid\n')
     params = StdioServerParameters(command=sys.executable, args=['-m','remote_workbench.session_server',
@@ -168,11 +185,15 @@ async def test_stdio_has_no_tool_bound_pages_but_can_read_archived_resources(tmp
         async with ClientSession(read, write) as client:
             await client.initialize()
             tools = (await client.list_tools()).tools
-            assert len(tools) == 8
+            assert len(tools) == 9
             for tool in tools:
                 meta = tool.meta or {}
-                assert not meta.get('ui', {}).get('resourceUri')
-                assert 'openai/outputTemplate' not in meta
+                expected = inline_app.BATCH_RESOURCE_URI if tool.name == 'exec_batch' else None
+                assert meta.get('ui', {}).get('resourceUri') == expected
+                assert meta.get('openai/outputTemplate') == expected
+            batch = (await client.read_resource(inline_app.BATCH_RESOURCE_URI)).contents[0]
+            assert batch.mimeType == 'text/html;profile=mcp-app'
+            assert batch.meta['openai/widgetShowCodexWidgetInline'] is True
             content = (await client.read_resource(inline_app.RESOURCE_URI)).contents[0]
             assert content.mimeType == 'text/html;profile=mcp-app'
             assert content.meta['openai/widgetShowCodexWidgetInline'] is False
@@ -182,6 +203,13 @@ async def test_stdio_has_no_tool_bound_pages_but_can_read_archived_resources(tmp
                 assert historical.text == content.text and historical.meta == content.meta
             result = await client.call_tool('exec_command', {'command':'must never run'}, meta={'threadId':'local'})
             assert result.isError and 'no remote workspace' in result.content[0].text
+
+
+def test_batch_card_bridge_renders_the_text_result_on_demand():
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('Node.js is needed for the batch card bridge harness')
+    subprocess.run([node, str(Path(__file__).with_name('batch_card.cjs'))], check=True, timeout=20)
 
 
 def test_archived_card_bridge_paging_and_untrusted_text():

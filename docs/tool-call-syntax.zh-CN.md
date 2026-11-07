@@ -89,7 +89,7 @@
 
 ## 客户端与内容边界
 
-命令优先使用 `exec_command(command=["python3","-m","unittest","-v"])`；确需 shell 管道或环境激活时才使用 shell 文本。同一目录的多项检查可用一次受监督的顺序批量执行：
+单条命令可使用 `exec_command(command=["python3","-m","unittest","-v"])`。Shell 文本支持管道和环境激活。需要把同一目录的多项检查显示成一张卡片时，把下面的参数传给 `exec_batch`，每批建议最多 8 条。
 
 ```json
 {"command":{"commands":[["git","status","--short"],["git","diff","--check"],["python3","-m","unittest","-v"]]},"timeout":30}

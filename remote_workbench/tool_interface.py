@@ -11,7 +11,7 @@ from remote_workbench.call_arguments import command_text
 
 
 TOOL_NAMES = frozenset({
-    "read_file", "workspace_switch", "workspace_use_local", "exec_command",
+    "read_file", "workspace_switch", "workspace_use_local", "exec_command", "exec_batch",
     "apply_patch", "read_output", "fetch_image",
 })
 
@@ -39,6 +39,7 @@ INSTRUCTIONS = (
     'Reuse manual SSH authentication; stop on identity/SSH failure, never reauthenticate or fall back locally. '
     'Heavy/parallel compute, scheduler and runtime/spawn tests require prior user confirmation of command/concurrency/environment, then compute_review. '
     'Results use native text. Records cover commands, input/output and managed diffs, not arbitrary shell writes. '
+    'Use exec_batch for grouped command cards. '
     + CALL_SOURCE_INSTRUCTIONS
 )
 

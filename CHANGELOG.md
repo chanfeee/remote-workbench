@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.8 — visible batch cards
+
+- Add `exec_batch` to display one lightweight inline text card per command group. The card reads the existing MCP result and draws output when expanded. Each batch has its own history entry.
+
 ## 0.4.7 — batches of up to eight commands
 
 - Prefer groups of up to eight commands or post-edit checks that can be prepared together. Send smaller ready groups immediately. Each batch returns one native tool result.
