@@ -168,6 +168,13 @@ const command={tool:'exec_command',host:'server',cwd:'/run',command:hostile,stat
   assert(groupDetails.includes('7. 失败 · exit 7'));
   assert(groupDetails.includes('8. 未执行'));
   assert.equal((groupDetails.match(/shared batch output/g)||[]).length,1);
+  const compactPayload=wrap([command,{...command,command:'second saved command'}]);
+  compactPayload._meta['remote-workbench/operation'].compact=true;
+  const compact=boot({call_tool_result:compactPayload});
+  const compactMarkup=compact.el('activity').innerHTML;
+  assert(compactMarkup.includes('<details class="activity-group"><summary>查看命令与输出</summary>'));
+  assert(compactMarkup.includes('class="section-count">2</span>'));
+  assert(compactMarkup.includes('second saved command')&&!compactMarkup.includes('<pre'));
   // Optional actual MCP wire metadata from the Python integration test.
   if(process.argv[2]){
     const fixture=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));

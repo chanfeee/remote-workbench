@@ -96,29 +96,37 @@ async def test_native_history_retains_independent_results_without_reexecution(pr
         assert page['content'] == expected
 
 
-async def test_batch_card_returns_one_result_with_independent_history(project):
+async def test_review_activity_groups_separate_commands_and_a_batch_without_ssh(project, monkeypatch):
     router, server, source, _ = project
-    single = await wire_call(server, 'a', 'exec_batch', host='a', cwd=str(source),
-                             command={'commands': [['printf', 'one']]})
-    assert single.isError and 'at least 2 commands' in single.content[0].text
-    assert router.registry.get_or_create('a').host is None
-    command = {'commands': [['printf', '%s\n', f'step {index}'] for index in range(1, 9)]}
-    card_ids = []
-    for _ in range(2):
-        wire = await wire_call(server, 'a', 'exec_batch', host='a', cwd=str(source), command=command)
-        assert not wire.isError and wire.structuredContent is None
-        assert len(wire.content) == 1 and wire.content[0].type == 'text'
-        result = json.loads(wire.content[0].text)
-        assert result['batch_state'] == 'finished'
-        assert [step['exit_code'] for step in result['steps']] == [0] * 8
-        card_id = f"remote-workbench:{result['operation_id']}"
-        assert wire.meta['openai/widgetSessionId'] == card_id
-        card, = wire.meta['remote-workbench/operation']['steps']
-        assert all(f'step {index}' in card['command'] for index in range(1, 9))
-        assert card['batch_steps'] == [{'state': 'finished', 'exit_code': 0}] * 8
-        assert card['streams']['stdout']['content'] == result['stdout']
-        card_ids.append(card_id)
-    assert len(set(card_ids)) == 2
+    commands = [['printf', 'first'], ['false'],
+                {'commands': [['printf', '%s\n', f'step {index}'] for index in range(3, 9)]}]
+    operation_ids = []
+    for tool, command in zip(('exec_command', 'exec_command', 'exec_batch'), commands):
+        wire = await wire_call(server, 'a', tool, host='a', cwd=str(source), command=command)
+        assert wire.meta is None
+        operation_ids.append(text_result(wire)['operation_id'])
+    executor = router.snapshot(router.registry.get_or_create('a')).workspace.executor
+
+    async def forbidden(*args, **kwargs):
+        raise AssertionError('Activity review must use only saved records')
+
+    monkeypatch.setattr(executor, 'run', forbidden)
+    await call(server, 'a', 'workspace_use_local')
+    wire = await wire_call(server, 'a', 'review_activity', operation_ids=operation_ids)
+    assert text_result(wire) == {'success': True, 'commands': 8, 'operation_ids': operation_ids}
+    card = wire.meta['remote-workbench/operation']
+    assert card['compact'] is True
+    first, failed, batch = card['steps']
+    assert first['streams']['stdout']['content'] == 'first'
+    assert failed['exit_code'] == 1
+    assert batch['batch_steps'] == [{'state': 'finished', 'exit_code': 0}] * 6
+    assert all(f'step {index}' in batch['command'] for index in range(3, 9))
+    single = await wire_call(server, 'a', 'review_activity', operation_ids=operation_ids[:1])
+    assert text_result(single)['commands'] == 1
+    assert single.meta['remote-workbench/operation']['steps'][0]['command'] == first['command']
+    assert single.meta['openai/widgetSessionId'] != wire.meta['openai/widgetSessionId']
+    other = await wire_call(server, 'b', 'review_activity', operation_ids=operation_ids[:1])
+    assert other.isError
 
 
 async def test_process_failure_remains_visible_in_text(project):
@@ -183,17 +191,18 @@ async def test_review_refusal_is_plain_text_without_execution(project, monkeypat
 
 async def test_card_preview_is_bounded_and_respects_the_text_budget(project):
     _, server, source, _ = project
-    wire = await wire_call(server, 'a', 'exec_batch', host='a', cwd=str(source),
-        command={'commands': [['python3', '-c', "print('x'*9000)"], ['true']]}, max_bytes=256)
+    wire = await wire_call(server, 'a', 'exec_command', host='a', cwd=str(source),
+        command=['python3', '-c', "print('x'*9000)"], max_bytes=256)
     result = text_result(wire)
     assert len(result['stdout'].encode()) <= 256 and result['truncated']
-    preview = wire.meta['remote-workbench/operation']['steps'][0]['streams']['stdout']
+    review = await wire_call(server, 'a', 'review_activity', operation_ids=[result['operation_id']])
+    preview = review.meta['remote-workbench/operation']['steps'][0]['streams']['stdout']
     assert len(preview['content'].encode()) <= inline_app.PREVIEW_BYTES and preview['truncated']
     full = text_result(await wire_call(server, 'a', 'read_output', output_id=result['output_id'], max_bytes=16384))
     assert 'x' * 9000 in full['content']
 
 
-async def test_stdio_binds_batch_and_diff_cards_and_keeps_archived_resources(tmp_path):
+async def test_stdio_binds_activity_and_diff_cards_and_keeps_archived_resources(tmp_path):
     config = tmp_path / 'hosts.yaml'
     config.write_text('hosts:\n  test:\n    ssh_host: never-connect.invalid\n')
     params = StdioServerParameters(command=sys.executable, args=['-m','remote_workbench.session_server',
@@ -205,7 +214,7 @@ async def test_stdio_binds_batch_and_diff_cards_and_keeps_archived_resources(tmp
             assert len(tools) == 9
             for tool in tools:
                 meta = tool.meta or {}
-                expected = inline_app.RESOURCE_URI if tool.name in {'exec_batch', 'apply_patch'} else None
+                expected = inline_app.RESOURCE_URI if tool.name in {'review_activity', 'apply_patch'} else None
                 assert meta.get('ui', {}).get('resourceUri') == expected
                 assert meta.get('openai/outputTemplate') == expected
             batch = (await client.read_resource(inline_app.BATCH_RESOURCE_URI)).contents[0]

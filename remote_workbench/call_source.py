@@ -10,7 +10,7 @@ from pathlib import Path
 from remote_workbench.command_spec import normalize_arguments
 
 _TOOLS = frozenset({'workspace_info', 'workspace_switch', 'workspace_use_local',
-                    'exec_command', 'exec_batch', 'apply_patch', 'read_file', 'read_output', 'fetch_image', 'workspace_tools'})
+                    'exec_command', 'exec_batch', 'review_activity', 'apply_patch', 'read_file', 'read_output', 'fetch_image', 'workspace_tools'})
 
 
 def parse_request(source):

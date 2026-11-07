@@ -52,7 +52,7 @@ summary:focus-visible,button:focus-visible{outline:2px solid var(--blue);outline
 .line.deleted{color:var(--red);background:var(--red-bg)}
 .line.meta{color:var(--muted)}
 .aggregate-diff{border-top:1px solid var(--border)}
-.aggregate-diff>summary{padding:8px 12px;color:var(--muted);font-size:12px}
+.aggregate-diff>summary,.activity-group>summary{padding:8px 12px;color:var(--muted);font-size:12px}
 .empty,.error,#error{padding:9px 12px;color:var(--muted);overflow-wrap:anywhere}
 .error,#error{color:var(--red)}
 button{margin:6px 0 0;padding:4px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text);font:inherit;font-size:11px;line-height:1.4;cursor:pointer}
@@ -202,13 +202,14 @@ button:disabled{opacity:.6;cursor:default}
       const notice=['unknown','cancelling','running','timeout','cancelled','not_run'].map(kind=>statuses.find(item=>item.kind===kind)).find(Boolean);
       const statusLabel=[failures?`${failures} 项失败`:'',notice?.label].filter(Boolean).join(' · ')||'已完成';
       const cwdNote = payload.cwd_count > 1 ? ` · ${payload.cwd_count} 个目录` : "";
+      const list = `<ul class="list">${commands.map(item=>renderCommand({...item,show_cwd:payload.cwd_count>1})).join("")}</ul>`;
       root.innerHTML = `
         <header class="header">
           <span class="title">命令 <span class="section-count">${commands.reduce((count, item) => count + (item.batch_steps?.length || 1), 0)}</span></span>
           <span class="workspace">${escapeHtml(payload.host)} · ${escapeHtml(payload.cwd || "")}${cwdNote}</span>
           <span class="status ${failures ? "failed" : notice ? "warning" : ""}">${statusLabel}</span>
         </header>
-        <ul class="list">${commands.map(item=>renderCommand({...item,show_cwd:payload.cwd_count>1})).join("")}</ul>
+        ${payload.compact ? `<details class="activity-group"><summary>查看命令与输出</summary>${list}</details>` : list}
         `;
     };
 
@@ -342,7 +343,8 @@ button:disabled{opacity:.6;cursor:default}
       stdout_truncated:!!s.streams?.stdout?.truncated,stderr_truncated:!!s.streams?.stderr?.truncated,
       truncated:!!(s.streams?.stdout?.truncated||s.streams?.stderr?.truncated)}));
     activityRoot.hidden=!commands.length;
-    if(commands.length)activityView.render({success:true,reads:[],commands,host:commands[0].host || '',cwd:commands[0].cwd || '',cwd_count:new Set(commands.map(s=>s.cwd)).size});
+    if(commands.length)activityView.render({success:true,reads:[],commands,compact:payload.compact===true,
+      host:commands[0].host || '',cwd:commands[0].cwd || '',cwd_count:new Set(commands.map(s=>s.cwd)).size});
     contentRoot.removeAttribute('data-pending');needsResize=true;observedHeight=undefined;
     return true;
   }

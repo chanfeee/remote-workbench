@@ -42,12 +42,12 @@ async def check():
                 tools = await client.list_tools()
                 assert len(tools.tools) == 9
                 by_name = {tool.name: tool for tool in tools.tools}
-                assert 'Use exec_batch for 2–8 ready commands' in by_name['exec_command'].description
-                assert by_name['exec_batch'].description.startswith('Run 2–32 argv commands')
+                assert 'Call review_activity once' in by_name['exec_command'].description
+                assert by_name['review_activity'].annotations.readOnlyHint
                 assert 'Include already-known post-edit checks in command=' in by_name['apply_patch'].description
                 for tool in by_name.values():
                     meta = tool.meta or {}
-                    expected = RESOURCE_URI if tool.name in {'exec_batch', 'apply_patch'} else None
+                    expected = RESOURCE_URI if tool.name in {'review_activity', 'apply_patch'} else None
                     assert meta.get('ui', {}).get('resourceUri') == expected
                     assert meta.get('openai/outputTemplate') == expected
                 batch = (await client.read_resource(BATCH_RESOURCE_URI)).contents[0]

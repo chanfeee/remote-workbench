@@ -1,5 +1,15 @@
 # Batch cards and historical results
 
+## 0.4.11 compact activity reviews
+
+Following LiteRemote's activity review pattern, `exec_command` returns its
+ordinary result and `operation_id`. At a group boundary, `review_activity`
+reads the selected command records in order and renders one collapsed inline
+card. This includes sequential calls that could not be batched and groups
+with only one command. The overview shares a bounded output budget across the
+group. Expanding it exposes the original command rows, and individual outputs
+draw on demand. A review uses the current chat's saved records without SSH.
+
 ## 0.4.10 cards for command groups
 
 `exec_batch` accepts two or more commands and binds the structured inline

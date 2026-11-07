@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.11 — compact command activity reviews
+
+- Collect saved command operation IDs and call `review_activity` once for a group. The compact card expands to show command details and output, including when the group contains just one command. The review reads local records. Managed patches retain inline diff cards.
+
 ## 0.4.10 — cards for command groups and diffs
 
 - Use `exec_batch` for one structured inline card with two or more commands. A single `exec_command` uses the client's normal tool record. Managed patches have an inline diff card.

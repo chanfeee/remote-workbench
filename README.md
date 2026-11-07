@@ -103,7 +103,7 @@ Version `0.4.2` accepts `exec_command(host=..., cwd=..., command=..., stdin=...)
 
 The `0.4.2` MCP entrypoints no longer start a standalone HTML server, allocate a viewer port, or return browser links. Closing an inline card does not stop execution or remove records. Older stable installations keep their installed behavior until explicitly upgraded.
 
-Use `exec_batch(command={commands:[...]})` to show two or more ready commands in one structured inline card. Prefer batches of up to eight. Expand the card to see all commands, exit codes, and shared output. Single commands use `exec_command` and the normal tool record. Patch cards show changed files and line diffs. Full records are available through `read_output`.
+Collect `operation_id` values from `exec_command` and call `review_activity(operation_ids=[...])` once after a group or before the final reply. The compact inline card opens to show commands, exit codes, and output, including for a single command. Prefer groups of up to eight commands. Managed patches display changed files and line diffs. Full records are available through `read_output`.
 
 Previously released `0.4.5` used independent inline cards. Their saved resources remain readable on demand without requesting automatic inline display. Upgrading does not delete old operations or replay commands. See [text and history compatibility](docs/inline-card-history.md). Existing installations keep their behavior until explicitly updated and reloaded; App enable/disable settings remain user-controlled.
 

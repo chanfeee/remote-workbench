@@ -11,13 +11,13 @@ from remote_workbench.call_arguments import command_text
 
 
 TOOL_NAMES = frozenset({
-    "read_file", "workspace_switch", "workspace_use_local", "exec_command", "exec_batch",
+    "read_file", "workspace_switch", "workspace_use_local", "exec_command", "review_activity",
     "apply_patch", "read_output", "fetch_image",
 })
 
 # These operations leave source files, bindings and jobs unchanged. Local
 # output caches/audit bookkeeping do not grant permission to mutate the source.
-READ_ONLY_TOOL_NAMES = frozenset({"read_file", "read_output", "fetch_image"})
+READ_ONLY_TOOL_NAMES = frozenset({"read_file", "read_output", "fetch_image", "review_activity"})
 
 CALL_SOURCE_INSTRUCTIONS = (
     'Use supplied schemas; print returned text once. '
@@ -38,7 +38,7 @@ INSTRUCTIONS = (
     'Native tools stay local; no remote Codex CLI. '
     'Reuse manual SSH authentication; stop on identity/SSH failure, never reauthenticate or fall back locally. '
     'Heavy/parallel compute, scheduler and runtime/spawn tests require prior user confirmation of command/concurrency/environment, then compute_review. '
-    'Inline cards show batches and diffs. Use exec_batch for 2–8 ready commands. '
+    'Inline cards show diffs and command groups. Use review_activity once per group. '
     'Records cover commands, input/output and managed diffs, not arbitrary shell writes. '
     + CALL_SOURCE_INSTRUCTIONS
 )
