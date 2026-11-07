@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.10 — cards for command groups and diffs
+
+- Use `exec_batch` for one structured inline card with two or more commands. A single `exec_command` uses the client's normal tool record. Managed patches have an inline diff card.
+
 ## 0.4.9 — structured inline cards
 
 - Restore the command and diff views. A batch shares one card with numbered commands, individual outcomes, and one expandable output section. Saved cards remain readable, including those from 0.4.8.

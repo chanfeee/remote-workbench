@@ -1,5 +1,13 @@
 # Batch cards and historical results
 
+## 0.4.10 cards for command groups
+
+`exec_batch` accepts two or more commands and binds the structured inline
+card. Prefer groups of up to eight ready commands in one directory. Single
+`exec_command` calls use the client's normal tool record, and `apply_patch`
+binds the inline diff view. Saved cards remain readable under their original
+resource URIs.
+
 ## 0.4.9 command and diff cards
 
 `exec_command` and `apply_patch` use the original structured card layout.

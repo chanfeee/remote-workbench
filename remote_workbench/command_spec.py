@@ -49,4 +49,6 @@ def normalize_arguments(name, arguments):
         if isinstance(arguments.get('command'), dict):
             # Reject invalid data before Pydantic can coerce booleans/arrays.
             validate_batch(arguments['command'])
+            if name == 'exec_batch' and len(arguments['command']['commands']) < 2:
+                raise ValueError('exec_batch requires at least 2 commands. Use exec_command for one.')
     return arguments

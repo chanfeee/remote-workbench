@@ -35,8 +35,10 @@ def text_result(wire):
 
 async def test_native_text_preserves_command_facts_and_chat_scoped_output(project):
     _, server, source, _ = project
-    text = text_result(await wire_call(server, 'a', 'exec_command', host='a', cwd=str(source),
-                                      command=['printf', '<script>untrusted</script>\n']))
+    wire = await wire_call(server, 'a', 'exec_command', host='a', cwd=str(source),
+                           command=['printf', '<script>untrusted</script>\n'])
+    text = text_result(wire)
+    assert wire.meta is None
     assert text['cwd'] == str(source) and text['exit_code'] == 0
     assert text['stdout'] == '<script>untrusted</script>\n'
     page = text_result(await wire_call(server, 'a', 'read_output', output_id=text['output_id'], max_bytes=256))
@@ -95,11 +97,15 @@ async def test_native_history_retains_independent_results_without_reexecution(pr
 
 
 async def test_batch_card_returns_one_result_with_independent_history(project):
-    _, server, source, _ = project
+    router, server, source, _ = project
+    single = await wire_call(server, 'a', 'exec_batch', host='a', cwd=str(source),
+                             command={'commands': [['printf', 'one']]})
+    assert single.isError and 'at least 2 commands' in single.content[0].text
+    assert router.registry.get_or_create('a').host is None
     command = {'commands': [['printf', '%s\n', f'step {index}'] for index in range(1, 9)]}
     card_ids = []
-    for tool in ('exec_command', 'exec_batch'):
-        wire = await wire_call(server, 'a', tool, host='a', cwd=str(source), command=command)
+    for _ in range(2):
+        wire = await wire_call(server, 'a', 'exec_batch', host='a', cwd=str(source), command=command)
         assert not wire.isError and wire.structuredContent is None
         assert len(wire.content) == 1 and wire.content[0].type == 'text'
         result = json.loads(wire.content[0].text)
@@ -177,17 +183,17 @@ async def test_review_refusal_is_plain_text_without_execution(project, monkeypat
 
 async def test_card_preview_is_bounded_and_respects_the_text_budget(project):
     _, server, source, _ = project
-    wire = await wire_call(server, 'a', 'exec_command', host='a', cwd=str(source),
-        command=['python3', '-c', "print('x'*9000)"], max_bytes=256)
+    wire = await wire_call(server, 'a', 'exec_batch', host='a', cwd=str(source),
+        command={'commands': [['python3', '-c', "print('x'*9000)"], ['true']]}, max_bytes=256)
     result = text_result(wire)
     assert len(result['stdout'].encode()) <= 256 and result['truncated']
     preview = wire.meta['remote-workbench/operation']['steps'][0]['streams']['stdout']
     assert len(preview['content'].encode()) <= inline_app.PREVIEW_BYTES and preview['truncated']
     full = text_result(await wire_call(server, 'a', 'read_output', output_id=result['output_id'], max_bytes=16384))
-    assert len(full['content']) == 9001
+    assert 'x' * 9000 in full['content']
 
 
-async def test_stdio_restores_command_and_diff_cards_and_keeps_archived_resources(tmp_path):
+async def test_stdio_binds_batch_and_diff_cards_and_keeps_archived_resources(tmp_path):
     config = tmp_path / 'hosts.yaml'
     config.write_text('hosts:\n  test:\n    ssh_host: never-connect.invalid\n')
     params = StdioServerParameters(command=sys.executable, args=['-m','remote_workbench.session_server',
@@ -196,10 +202,10 @@ async def test_stdio_restores_command_and_diff_cards_and_keeps_archived_resource
         async with ClientSession(read, write) as client:
             await client.initialize()
             tools = (await client.list_tools()).tools
-            assert len(tools) == 8
+            assert len(tools) == 9
             for tool in tools:
                 meta = tool.meta or {}
-                expected = inline_app.RESOURCE_URI if tool.name in {'exec_command', 'apply_patch'} else None
+                expected = inline_app.RESOURCE_URI if tool.name in {'exec_batch', 'apply_patch'} else None
                 assert meta.get('ui', {}).get('resourceUri') == expected
                 assert meta.get('openai/outputTemplate') == expected
             batch = (await client.read_resource(inline_app.BATCH_RESOURCE_URI)).contents[0]

@@ -11,7 +11,7 @@ from remote_workbench.call_arguments import command_text
 
 
 TOOL_NAMES = frozenset({
-    "read_file", "workspace_switch", "workspace_use_local", "exec_command",
+    "read_file", "workspace_switch", "workspace_use_local", "exec_command", "exec_batch",
     "apply_patch", "read_output", "fetch_image",
 })
 
@@ -38,7 +38,8 @@ INSTRUCTIONS = (
     'Native tools stay local; no remote Codex CLI. '
     'Reuse manual SSH authentication; stop on identity/SSH failure, never reauthenticate or fall back locally. '
     'Heavy/parallel compute, scheduler and runtime/spawn tests require prior user confirmation of command/concurrency/environment, then compute_review. '
-    'Inline cards show saved operations. Records cover commands, input/output and managed diffs, not arbitrary shell writes. '
+    'Inline cards show batches and diffs. Use exec_batch for 2–8 ready commands. '
+    'Records cover commands, input/output and managed diffs, not arbitrary shell writes. '
     + CALL_SOURCE_INSTRUCTIONS
 )
 

@@ -10,11 +10,11 @@ from remote_workbench.call_arguments import command_text
 from remote_workbench.presentation import parse_unified_diff, summarize_record
 from remote_workbench.session_context import get_codex_identity
 
-RESOURCE_URI = 'ui://remote-workbench/operation-v9.html'
+RESOURCE_URI = 'ui://remote-workbench/operation-v10.html'
 BATCH_RESOURCE_URI = 'ui://remote-workbench/batch-v1.html'
 HISTORICAL_RESOURCE_URIS = tuple(f'ui://remote-workbench/operation-v{version}.html'
-                                 for version in (2, 4, 5, 6, 7, 8))
-CARD_TOOLS = frozenset({'exec_command', 'exec_batch', 'apply_patch'})
+                                 for version in (2, 4, 5, 6, 7, 8, 9))
+CARD_TOOLS = frozenset({'exec_batch', 'apply_patch'})
 PREVIEW_BYTES = 4096
 
 
