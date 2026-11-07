@@ -12,7 +12,7 @@ from tests.test_session_server import call, project, router_at
 async def test_primary_patch_schema_accepts_local_patch_and_optional_snapshots(tmp_path):
     server = create_server(router_at(tmp_path))
     tools = {tool.name:tool for tool in await server.list_tools()}
-    assert len(tools) == 9
+    assert len(tools) == 8
     schema = tools['apply_patch'].inputSchema
     assert {'edits', 'patch'} <= schema['properties'].keys()
     assert schema['additionalProperties'] is False

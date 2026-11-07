@@ -1,5 +1,12 @@
 # Batch cards and historical results
 
+## 0.4.9 command and diff cards
+
+`exec_command` and `apply_patch` use the original structured card layout.
+An argv batch displays numbered commands and their outcomes in one card with
+one shared output preview. The existing paging and deferred drawing paths
+handle expanded output and diffs. Saved cards keep their own identities.
+
 ## 0.4.8 batch cards
 
 Use `exec_batch` for ready command groups, preferably up to eight steps in

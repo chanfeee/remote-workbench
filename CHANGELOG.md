@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.9 — structured inline cards
+
+- Restore the command and diff views. A batch shares one card with numbered commands, individual outcomes, and one expandable output section. Saved cards remain readable, including those from 0.4.8.
+
 ## 0.4.8 — visible batch cards
 
 - Add `exec_batch` to display one lightweight inline text card per command group. The card reads the existing MCP result and draws output when expanded. Each batch has its own history entry.

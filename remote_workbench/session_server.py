@@ -15,7 +15,7 @@ import time
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.server.fastmcp.tools.base import Tool
-from mcp.types import CallToolResult, ToolAnnotations
+from mcp.types import ToolAnnotations
 
 from remote_workbench import audit, job_collector
 from remote_workbench.config import load_config
@@ -31,7 +31,7 @@ from remote_workbench import baseline
 from remote_workbench.call_arguments import selected_files, validate_output_budget
 from remote_workbench.edit_spec import PreparedEdit
 from remote_workbench.command_spec import Command, CommandBatch, normalize_arguments
-from remote_workbench.inline_app import batch_card_result, install as install_inline_app
+from remote_workbench.inline_app import install as install_inline_app
 from remote_workbench.tool_interface import COMMAND_BATCH_GUIDANCE, INSTRUCTIONS, READ_ONLY_TOOL_NAMES, TOOL_NAMES, present_result
 
 # Read-only checks and controls must remain available while a foreground
@@ -490,12 +490,11 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
 
     def register(name, signature, description, execute):
         executors[name] = execute
-        batch_card = name == 'exec_batch'
-        result_type = CallToolResult if batch_card else str
+        result_name = 'exec_command' if name == 'exec_batch' else name
         # Context is injected by FastMCP and deliberately absent from JSON Schema.
         signature = signature.replace(parameters=[*signature.parameters.values(),
             inspect.Parameter("ctx", inspect.Parameter.KEYWORD_ONLY, annotation=Context, default=None)],
-            return_annotation=result_type)
+            return_annotation=str)
 
         async def invoke(**kwargs):
             started = time.monotonic()
@@ -517,8 +516,7 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
                                     client_session_id=identity.session_id)
                     with audit.scoped_root(directory), audit.scoped_metadata(**metadata):
                         result = await execute(current, identity, **arguments)
-                        text = pack(result, router.registry.get(current.workspace_id),
-                                    'exec_command' if batch_card else name, arguments)
+                        text = pack(result, router.registry.get(current.workspace_id), result_name, arguments)
                         initial = result.get("initial", {})
                         following = result.get('command_result', {})
                         failed = bool(result.get("error") or result.get("initial_error") or result.get("timed_out") or
@@ -528,7 +526,7 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
                                       following.get('error') or following.get('timed_out') or
                                       following.get('exit_code') not in (None, 0))
                         record_metrics(current, name, arguments, text, started, result=result, failed=failed)
-                        return batch_card_result(text, result) if batch_card else text
+                        return text
 
                 if name in _UNLOCKED_TOOLS:
                     # Re-read current workspace state without waiting on a
@@ -548,7 +546,7 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
         invoke.__doc__ = description
         invoke.__signature__ = signature
         invoke.__annotations__ = {p.name: p.annotation for p in signature.parameters.values()}
-        invoke.__annotations__["return"] = result_type
+        invoke.__annotations__["return"] = str
         handlers[name] = invoke
         annotations = (ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False)
                        if name in READ_ONLY_TOOL_NAMES else None)
@@ -607,7 +605,7 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
     for name, function, description in TOOLS:
         if name == 'exec_command':
             description = (COMMAND_BATCH_GUIDANCE +
-                'Use exec_batch to show the group as one inline card. '
+                'The group shares one inline card. '
                 'Optional host + absolute cwd binds and runs together; repeat the same target without rebinding. '
                 'read_files/edit_files return selected files after confirmed completion, including nonzero exits; edit_files includes guarded edit_ids. '
                 'Paths use the command cwd; max_bytes applies to command/per file. stdin is exact text. '
@@ -665,7 +663,7 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
         if unknown:
             raise ToolError("Unknown argument names: " + ", ".join(sorted(unknown)))
         return await schemas[tool].run(arguments, context=ctx)
-    install_inline_app(server)
+    install_inline_app(server, router)
     return server
 
 

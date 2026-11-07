@@ -105,11 +105,11 @@ async def test_observed_missing_delimiter_is_rejected_before_transport_or_write(
 async def test_shared_instructions_and_catalog_keep_required_boundaries(project):
     _, server, _, _ = project
     tools = {tool.name: tool for tool in await server.list_tools()}
-    assert len(tools) == 9
+    assert len(tools) == 8
     assert len(INSTRUCTIONS) <= 700
     for boundary in ('New chats start local', 'manual SSH', 'identity/SSH failure',
                      'user confirmation', 'compute_review', 'no remote Codex CLI',
-                     'Results use native text'):
+                     'Inline cards'):
         assert boundary in INSTRUCTIONS
     assert 'Show supplied' not in INSTRUCTIONS and 'operation_log' not in INSTRUCTIONS
     assert 'activate environments per call' in tools['exec_command'].description

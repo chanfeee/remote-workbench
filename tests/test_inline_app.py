@@ -28,7 +28,7 @@ async def wire_call(server, thread, name, **arguments):
 
 def text_result(wire):
     assert not wire.isError
-    assert wire.meta is None  # No widget identity or duplicate UI preview.
+    assert wire.structuredContent is None
     assert len(wire.content) == 1 and wire.content[0].type == 'text'
     return json.loads(wire.content[0].text)
 
@@ -48,14 +48,18 @@ async def test_native_text_preserves_command_facts_and_chat_scoped_output(projec
 async def test_patch_text_keeps_original_diff_and_followup_result(project):
     _, server, source, _ = project
     await call(server, 'a', 'workspace_switch', host='a', cwd=str(source))
-    text = text_result(await wire_call(server, 'a', 'apply_patch',
+    wire = await wire_call(server, 'a', 'apply_patch',
         patch='*** Begin Patch\n*** Update File: value.txt\n@@\n-original\n+updated\n*** End Patch',
-        command=['printf', 'checked']))
+        command=['printf', 'checked'])
+    text = text_result(wire)
     assert (source / 'value.txt').read_text() == 'updated\n'
     assert text['command_result']['stdout'] == 'checked'
     assert text['command_result']['exit_code'] == 0
     diff = text_result(await wire_call(server, 'a', 'read_output', output_id=text['output_id'], stream='diff'))
     assert '-original\n+updated' in diff['content']
+    patch, check = wire.meta['remote-workbench/operation']['steps']
+    assert patch['tool'] == 'apply_patch' and '-original\n+updated' in patch['streams']['diff']['content']
+    assert check['tool'] == 'exec_command' and check['streams']['stdout']['content'] == 'checked'
 
 
 async def test_native_batch_retains_all_steps_in_one_tool_result(project):
@@ -94,15 +98,19 @@ async def test_batch_card_returns_one_result_with_independent_history(project):
     _, server, source, _ = project
     command = {'commands': [['printf', '%s\n', f'step {index}'] for index in range(1, 9)]}
     card_ids = []
-    for _ in range(2):
-        wire = await wire_call(server, 'a', 'exec_batch', host='a', cwd=str(source), command=command)
+    for tool in ('exec_command', 'exec_batch'):
+        wire = await wire_call(server, 'a', tool, host='a', cwd=str(source), command=command)
         assert not wire.isError and wire.structuredContent is None
         assert len(wire.content) == 1 and wire.content[0].type == 'text'
         result = json.loads(wire.content[0].text)
         assert result['batch_state'] == 'finished'
         assert [step['exit_code'] for step in result['steps']] == [0] * 8
-        card_id = f"remote-workbench:batch:{result['operation_id']}"
-        assert wire.meta == {'openai/widgetSessionId': card_id}
+        card_id = f"remote-workbench:{result['operation_id']}"
+        assert wire.meta['openai/widgetSessionId'] == card_id
+        card, = wire.meta['remote-workbench/operation']['steps']
+        assert all(f'step {index}' in card['command'] for index in range(1, 9))
+        assert card['batch_steps'] == [{'state': 'finished', 'exit_code': 0}] * 8
+        assert card['streams']['stdout']['content'] == result['stdout']
         card_ids.append(card_id)
     assert len(set(card_ids)) == 2
 
@@ -167,16 +175,19 @@ async def test_review_refusal_is_plain_text_without_execution(project, monkeypat
     assert result['executed'] is False and result['error'] == 'compute_review_required'
 
 
-async def test_native_text_uses_caller_budget_without_duplicate_preview(project):
+async def test_card_preview_is_bounded_and_respects_the_text_budget(project):
     _, server, source, _ = project
-    result = text_result(await wire_call(server, 'a', 'exec_command', host='a', cwd=str(source),
-        command=['python3', '-c', "print('x'*9000)"], max_bytes=256))
+    wire = await wire_call(server, 'a', 'exec_command', host='a', cwd=str(source),
+        command=['python3', '-c', "print('x'*9000)"], max_bytes=256)
+    result = text_result(wire)
     assert len(result['stdout'].encode()) <= 256 and result['truncated']
+    preview = wire.meta['remote-workbench/operation']['steps'][0]['streams']['stdout']
+    assert len(preview['content'].encode()) <= inline_app.PREVIEW_BYTES and preview['truncated']
     full = text_result(await wire_call(server, 'a', 'read_output', output_id=result['output_id'], max_bytes=16384))
     assert len(full['content']) == 9001
 
 
-async def test_stdio_binds_only_the_batch_card_and_keeps_archived_resources(tmp_path):
+async def test_stdio_restores_command_and_diff_cards_and_keeps_archived_resources(tmp_path):
     config = tmp_path / 'hosts.yaml'
     config.write_text('hosts:\n  test:\n    ssh_host: never-connect.invalid\n')
     params = StdioServerParameters(command=sys.executable, args=['-m','remote_workbench.session_server',
@@ -185,10 +196,10 @@ async def test_stdio_binds_only_the_batch_card_and_keeps_archived_resources(tmp_
         async with ClientSession(read, write) as client:
             await client.initialize()
             tools = (await client.list_tools()).tools
-            assert len(tools) == 9
+            assert len(tools) == 8
             for tool in tools:
                 meta = tool.meta or {}
-                expected = inline_app.BATCH_RESOURCE_URI if tool.name == 'exec_batch' else None
+                expected = inline_app.RESOURCE_URI if tool.name in {'exec_command', 'apply_patch'} else None
                 assert meta.get('ui', {}).get('resourceUri') == expected
                 assert meta.get('openai/outputTemplate') == expected
             batch = (await client.read_resource(inline_app.BATCH_RESOURCE_URI)).contents[0]
@@ -196,11 +207,12 @@ async def test_stdio_binds_only_the_batch_card_and_keeps_archived_resources(tmp_
             assert batch.meta['openai/widgetShowCodexWidgetInline'] is True
             content = (await client.read_resource(inline_app.RESOURCE_URI)).contents[0]
             assert content.mimeType == 'text/html;profile=mcp-app'
-            assert content.meta['openai/widgetShowCodexWidgetInline'] is False
+            assert content.meta['openai/widgetShowCodexWidgetInline'] is True
             assert content.meta['ui']['csp']['connectDomains'] == []
             for uri in inline_app.HISTORICAL_RESOURCE_URIS:
                 historical = (await client.read_resource(uri)).contents[0]
-                assert historical.text == content.text and historical.meta == content.meta
+                assert historical.text == content.text
+                assert historical.meta['openai/widgetShowCodexWidgetInline'] is False
             result = await client.call_tool('exec_command', {'command':'must never run'}, meta={'threadId':'local'})
             assert result.isError and 'no remote workspace' in result.content[0].text
 

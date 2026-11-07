@@ -66,7 +66,7 @@ button:disabled{opacity:.6;cursor:default}
   function outcome(item){
     const state=String(item.state || '').toLowerCase();
     let kind;
-    if(item.executed===false)kind='not_run';
+    if(item.executed===false||state==='not_run')kind='not_run';
     else if(['cancellation_requested','cancel_requested','cancelling'].includes(state))kind='cancelling';
     else if(['unknown','remote_state_unknown','cancellation_unconfirmed'].includes(state)||item.cleanup_state==='unconfirmed')kind='unknown';
     else if(item.timed_out||['timeout','timed_out'].includes(state))kind='timeout';
@@ -178,7 +178,12 @@ button:disabled{opacity:.6;cursor:default}
             const data = streams[stream];
             return data?.content ? `<div class="detail-line">${stream === 'stdout' ? '标准输出' : '标准错误'}${data.truncated ? '（截断）' : ''}</div><pre${stream === 'stderr' ? ' class="stderr"' : ''} id="rwb-output-${item.step_index}-${stream}">${escapeHtml(data.content)}</pre>${moreButton(item.step_index, stream, data.truncated)}` : '';
           }).join('');
-          return output + (item.error ? `<pre class="stderr">${escapeHtml(item.error)}</pre>` : '');
+          const batch = (item.batch_steps || []).map((step, index) => {
+            const status = outcome(step);
+            return `${index + 1}. ${status.label}${Number.isInteger(step.exit_code) ? ` · exit ${step.exit_code}` : ''}`;
+          }).join('　');
+          return (batch ? `<div class="detail-line">${escapeHtml(batch)}</div>` : '') + output
+            + (item.error ? `<pre class="stderr">${escapeHtml(item.error)}</pre>` : '');
         }, 'detail')}
       </details></li>`;
     };
@@ -199,7 +204,7 @@ button:disabled{opacity:.6;cursor:default}
       const cwdNote = payload.cwd_count > 1 ? ` · ${payload.cwd_count} 个目录` : "";
       root.innerHTML = `
         <header class="header">
-          <span class="title">命令 <span class="section-count">${commands.length}</span></span>
+          <span class="title">命令 <span class="section-count">${commands.reduce((count, item) => count + (item.batch_steps?.length || 1), 0)}</span></span>
           <span class="workspace">${escapeHtml(payload.host)} · ${escapeHtml(payload.cwd || "")}${cwdNote}</span>
           <span class="status ${failures ? "failed" : notice ? "warning" : ""}">${statusLabel}</span>
         </header>
@@ -279,7 +284,7 @@ button:disabled{opacity:.6;cursor:default}
   function showError(message){queuedError=String(message);errorEvent=++eventSerial;schedule();}
   function initialize(){
     if(!readyPromise){
-      readyPromise=rpc('ui/initialize',{appInfo:{name:'Remote Workbench',version:'8.0.0'},appCapabilities:{},protocolVersion:'2026-01-26'})
+      readyPromise=rpc('ui/initialize',{appInfo:{name:'Remote Workbench',version:'9.0.0'},appCapabilities:{},protocolVersion:'2026-01-26'})
         .then(()=>{notify('ui/notifications/initialized',{});resize();})
         .catch(error=>{readyPromise=undefined;showError(error.message || String(error));throw error;});
     }

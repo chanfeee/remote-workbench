@@ -154,6 +154,20 @@ const command={tool:'exec_command',host:'server',cwd:'/run',command:hostile,stat
   delayed.el('review').innerHTML='preserved interaction';
   delayed.events['openai:set_globals']({detail:{globals:{toolResponseMetadata:{call_tool_result:wrap([patch])}}}});
   assert.equal(delayed.el('review').innerHTML,'preserved interaction');
+  const grouped=boot({call_tool_result:wrap([{...command,exit_code:7,
+    command:Array.from({length:8},(_,i)=>`${i+1}: printf step-${i+1}`).join('\n'),
+    batch_steps:[...Array.from({length:6},()=>({state:'finished',exit_code:0})),
+      {state:'finished',exit_code:7},{state:'not_run',exit_code:null}],
+    streams:{stdout:{content:'shared batch output',next_cursor:19,truncated:false}}}])});
+  const groupMarkup=grouped.el('activity').innerHTML;
+  assert(groupMarkup.includes('class="section-count">8</span>'));
+  assert(groupMarkup.includes('8: printf step-8'));
+  assert.equal((groupMarkup.match(/data-detail=/g)||[]).length,1);
+  assert(!groupMarkup.includes('shared batch output'));
+  const groupDetails=grouped.toggle('activity','rwb-detail-0-command').innerHTML;
+  assert(groupDetails.includes('7. 失败 · exit 7'));
+  assert(groupDetails.includes('8. 未执行'));
+  assert.equal((groupDetails.match(/shared batch output/g)||[]).length,1);
   // Optional actual MCP wire metadata from the Python integration test.
   if(process.argv[2]){
     const fixture=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));

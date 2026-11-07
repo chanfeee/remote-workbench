@@ -66,14 +66,14 @@ async def test_schema_context_injection_and_missing_identity_fail_closed(tmp_pat
     router = router_at(tmp_path)
     server = create_server(router)
     tools = await server.list_tools()
-    assert len(tools) == 9
+    assert len(tools) == 8
     assert "workspace_tools" in {tool.name for tool in tools}
     advanced = await call(server, "catalog", "workspace_tools", tool="describe", arguments={"name":"resolve_operation"})
     assert advanced["name"] == "resolve_operation"
     for tool in tools:
         fields = tool.inputSchema["properties"]
         assert not {"ctx", "thread_id", "threadId", "workspace_id", "session_id"} & fields.keys()
-        assert ("host" in fields) == (tool.name in {"workspace_switch", "exec_command", "exec_batch"})
+        assert ("host" in fields) == (tool.name in {"workspace_switch", "exec_command"})
         assert tool.outputSchema is None
     with pytest.raises(ToolError, match="threadId is unavailable"):
         await call(server, None, "exec_command", command="must never run")
