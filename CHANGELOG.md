@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.7 — batches of up to eight commands
+
+- Prefer groups of up to eight commands or post-edit checks that can be prepared together. Send smaller ready groups immediately. Each batch returns one native tool result.
+
 ## 0.4.6 — native text results
 
 - Stop binding HTML templates to commands and managed edits. New operations return ordinary MCP text, without creating custom widgets, generating preview copies or reading audit files for UI decoration. Full output/diff records and the eight-tool interface remain available.

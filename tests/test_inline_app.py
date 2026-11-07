@@ -60,12 +60,14 @@ async def test_patch_text_keeps_original_diff_and_followup_result(project):
 
 async def test_native_batch_retains_all_steps_in_one_tool_result(project):
     _, server, source, _ = project
+    labels = [f'step {number}' for number in range(1, 9)]
     result = text_result(await wire_call(server, 'a', 'exec_command', host='a', cwd=str(source),
-        command={'commands': [['printf', label + '\n'] for label in ('first', 'second', 'third')]}))
+        command={'commands': [['printf', label + '\n'] for label in labels]}))
     assert result['exit_code'] == 0 and result['batch_state'] == 'finished'
-    assert [step['exit_code'] for step in result['steps']] == [0, 0, 0]
-    assert [step['state'] for step in result['steps']] == ['finished'] * 3
-    assert result['stdout'] == '[command 1/3]\nfirst\n[command 2/3]\nsecond\n[command 3/3]\nthird\n'
+    assert [step['exit_code'] for step in result['steps']] == [0] * 8
+    assert [step['state'] for step in result['steps']] == ['finished'] * 8
+    assert result['stdout'] == ''.join(f'[command {number}/8]\n{label}\n'
+                                      for number, label in enumerate(labels, 1))
     saved = text_result(await wire_call(server, 'a', 'read_output', output_id=result['output_id']))
     assert saved['content'] == result['stdout']
 

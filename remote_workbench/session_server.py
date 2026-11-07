@@ -573,7 +573,7 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
             structured_apply_patch.__name__ = "apply_patch"
             structured_apply_patch.__doc__ = (
                 "Apply local-style context patches (Add/Delete supported) or unified diffs. Optional edits use guarded snapshots; pass patch or edits. "
-                "Include already-known post-edit checks in command={commands:[argv,...]} for one edit/check result; shell text/argv also work. "
+                "Include already-known post-edit checks in command={commands:[argv,...]} for one edit/check result (prefer up to 8 checks). Shell text/argv also work. "
                 "read_files/edit_files explicitly return files after edits/checks; edit_files includes fresh guarded IDs. "
                 "check_only cannot run command. Full patch/diff is recorded.")
             server.tool(structured_output=False)(structured_apply_patch)

@@ -25,9 +25,10 @@ CALL_SOURCE_INSTRUCTIONS = (
 )
 
 COMMAND_BATCH_GUIDANCE = (
-    'Prefer one {commands:[argv,...]} batch for already-known commands in the same cwd: '
-    'one native result with per-step exits, sequential, stop on error by default. '
-    'Split calls when later arguments depend on earlier output. Shell text and single argv also work. '
+    'Prefer one {commands:[argv,...]} batch of up to 8 already-known commands in the same cwd. '
+    'Submit smaller ready batches immediately. Each batch runs sequentially and returns one native result '
+    'with per-step exits. Stop on error by default. Split calls when later arguments depend on earlier output. '
+    'Shell text and single argv also work. '
 )
 
 # Clients may repeat server instructions in every deferred tool description.

@@ -11,8 +11,9 @@ records, available through `read_output` and the records CLI.
 
 To reduce native tool entries, the command description instructs callers to
 submit already-known commands for the same directory as one
-`command={commands:[argv,...]}` batch. All steps share one tool result and output
-record while retaining their individual exit codes. Known post-edit checks
+`command={commands:[argv,...]}` batch. As of 0.4.7, prefer up to eight commands
+and send smaller ready batches immediately. All steps share one tool result
+and output record while retaining their individual exit codes. Known post-edit checks
 belong in `apply_patch.command`. This is a calling convention, not server-side
 coalescing of separate requests: the client still owns the presentation of
 independent tool calls. Calls that need earlier output to determine their next
