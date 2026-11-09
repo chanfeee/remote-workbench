@@ -68,6 +68,12 @@ def _write_status(status_path, status):
         raise
 
 
+def _append_checkpoint(stream, status):
+    stream.write(json.dumps(status, ensure_ascii=False, separators=(",", ":")) + "\n")
+    stream.flush()
+    os.fsync(stream.fileno())
+
+
 def _new_step(index):
     return {
         "index": index,
@@ -105,48 +111,53 @@ def run_batch(spec, status_path, nonce):
         "steps": [_new_step(index) for index in range(len(commands))],
     }
     first_nonzero = 0
-    for index, argv in enumerate(commands):
-        step = status["steps"][index]
-        step["state"] = "running"
-        _write_status(status_path, status)
+    journal_path = os.fsdecode(os.fspath(status_path)) + "l"
+    # Keep one private inode for the intermediate checkpoints. A successful
+    # fsync still precedes every dispatch, and the terminal snapshot is atomic.
+    with open(journal_path, "x", encoding="utf-8",
+              opener=lambda path, flags: os.open(path, flags, 0o600)) as journal:
+        for index, argv in enumerate(commands):
+            step = status["steps"][index]
+            step["state"] = "running"
+            _append_checkpoint(journal, status)
 
-        sys.stdout.write("[command {}/{}]\n".format(index + 1, len(commands)))
-        sys.stdout.flush()
+            sys.stdout.write("[command {}/{}]\n".format(index + 1, len(commands)))
+            sys.stdout.flush()
 
-        started_at = time.monotonic_ns()
-        try:
-            process = subprocess.Popen(
-                argv,
-                stdin=subprocess.DEVNULL,
-                shell=False,
-            )
-        except OSError as error:
-            exit_code = 127
-            step["error"] = _bounded_oserror(error)
+            started_at = time.monotonic_ns()
+            try:
+                process = subprocess.Popen(
+                    argv,
+                    stdin=subprocess.DEVNULL,
+                    shell=False,
+                )
+            except OSError as error:
+                exit_code = 127
+                step["error"] = _bounded_oserror(error)
+                step["state"] = "finished"
+                step["exit_code"] = exit_code
+                step["elapsed_ms"] = _elapsed_ms(started_at)
+                if first_nonzero == 0:
+                    first_nonzero = exit_code
+                if stop_on_error:
+                    break
+                continue
+
+            raw_exit_code = process.wait()
+            if raw_exit_code < 0:
+                signal_number = -raw_exit_code
+                exit_code = 128 + signal_number
+                step["signal"] = signal_number
+            else:
+                exit_code = raw_exit_code
             step["state"] = "finished"
             step["exit_code"] = exit_code
             step["elapsed_ms"] = _elapsed_ms(started_at)
-            if first_nonzero == 0:
-                first_nonzero = exit_code
-            if stop_on_error:
-                break
-            continue
-
-        raw_exit_code = process.wait()
-        if raw_exit_code < 0:
-            signal_number = -raw_exit_code
-            exit_code = 128 + signal_number
-            step["signal"] = signal_number
-        else:
-            exit_code = raw_exit_code
-        step["state"] = "finished"
-        step["exit_code"] = exit_code
-        step["elapsed_ms"] = _elapsed_ms(started_at)
-        if exit_code != 0:
-            if first_nonzero == 0:
-                first_nonzero = exit_code
-            if stop_on_error:
-                break
+            if exit_code != 0:
+                if first_nonzero == 0:
+                    first_nonzero = exit_code
+                if stop_on_error:
+                    break
 
     if stop_on_error and first_nonzero != 0:
         for step in status["steps"]:

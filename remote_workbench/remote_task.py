@@ -234,14 +234,34 @@ def forward_task_output(reader, name, root, marker):
             output.flush()
 
 
+def _batch_progress_snapshot(root):
+    maximum = 131072
+    path = root / 'batch-progress.json'
+    if path.is_symlink():
+        raise ValueError('Invalid batch progress')
+    try:
+        with path.open('rb') as source:
+            return source.read(maximum + 1)
+    except FileNotFoundError:
+        journal = root / 'batch-progress.jsonl'
+        if journal.is_symlink():
+            raise ValueError('Invalid batch progress journal')
+        with journal.open('rb') as source:
+            end = source.seek(0, os.SEEK_END)
+            source.seek(max(0, end - 2 * (maximum + 1)))
+            tail = source.read(2 * (maximum + 1))
+        # The runner may have been killed while writing the next row. A
+        # dispatch can occur only after its newline and fsync succeeded.
+        parts = tail.rsplit(b'\n', 2)
+        if len(parts) < 2:
+            raise ValueError('No complete batch checkpoint')
+        return parts[-2]
+
+
 def batch_progress(root, nonce, count=None):
     """Read only bounded structured progress, never infer step results from stdout."""
     try:
-        path = root / 'batch-progress.json'
-        if path.is_symlink() or path.stat().st_size > 131072:
-            raise ValueError('Invalid batch progress')
-        with path.open('rb') as source:
-            data = source.read(131073)
+        data = _batch_progress_snapshot(root)
         value = json.loads(data)
         if not isinstance(value, dict):
             raise ValueError('Invalid batch progress')

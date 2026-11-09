@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.16 — lower batch checkpoint latency
+
+- Sync each pre-dispatch checkpoint to a single private journal. Keep the atomic final snapshot and recover the last complete checkpoint if a batch is interrupted.
+
 ## 0.4.15 — faster text reads in bound chats
 
 - Run single and selected text reads through a dedicated worker that skips the interactive login shell while retaining supervision, output limits, and edit snapshot checks.
