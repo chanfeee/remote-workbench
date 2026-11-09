@@ -154,7 +154,7 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
     server = SessionMCP("remote-workbench-session", instructions=INSTRUCTIONS)
 
     def pack(result, state, name=None, arguments=None):
-        result = present_result(name, dict(result), arguments)
+        result = present_result(name, result, arguments, workspace_cwd=state.cwd)
         return json.dumps(result, ensure_ascii=False, separators=(",", ":"), default=str)
 
     async def info(state, identity, **arguments):
@@ -612,7 +612,8 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
                 'Optional host + absolute cwd binds and runs together; repeat the same target without rebinding. '
                 'read_files/edit_files return selected files after confirmed completion, including nonzero exits; edit_files includes guarded edit_ids. '
                 'Paths use the command cwd; max_bytes applies to command/per file. stdin is exact text. '
-                'Fresh account shell; activate environments per call.')
+                'Fresh account shell; activate environments per call. '
+                'Ordinary completion uses process-group cleanup without a verified process tree or hard process cap.')
         signature = inspect.signature(function, eval_str=True)
         public = signature.replace(parameters=[
             p.replace(default=".") if p.name == "cwd" else p.replace(default=_BUDGETS[name])
@@ -639,7 +640,8 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
             register('exec_batch', batch_signature,
                 ('Run a ready group of 2–32 sequential argv commands (prefer up to 8) and return one '
                  'collapsed inline card with the result. Pass host and absolute cwd to bind and run in '
-                 'the same call. Omit host when already bound. Stop on error by default.'), execute)
+                 'the same call. Omit host when already bound. Stop on error by default. '
+                 'Ordinary completion uses process-group cleanup without a verified process tree or hard process cap.'), execute)
 
     inspect_bound = make_executor(router, 'inspect_batch', ssh_inspect_batch, read_selection)
 

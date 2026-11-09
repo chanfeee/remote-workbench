@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.20 — compact successful command replies
+
+- Omit the usual process-group cleanup metadata and redundant cwd from successful command replies. Keep the original audit record, output IDs, and failure diagnostics.
+
 ## 0.4.19 — fewer calls for remote inspection and edits
 
 - Allow a read-only batch to use one explicit host and absolute directory without changing the chat binding.

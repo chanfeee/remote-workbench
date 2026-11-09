@@ -126,3 +126,5 @@ python -m remote_workbench.call_source docs/examples/edit-request.json
 - `git diff --worktree-raw -- 路径...` 可比较 1–4 个明确指定的已跟踪文本文件。比较暂存区 blob 和工作区原始字节，支持已删除文件，每个文件最多 256 KiB、4096 行。Git 的过滤器、外部 diff 和模式变更由普通 `git diff` 处理，后者仍需审批。
 
 原始补丁可用 `apply_patch(host=..., cwd=..., patch=..., command=..., read_files=...)` 在一次调用里绑定目标、应用补丁、执行检查并回读文件。这个调用仍需审批。使用已有 `edit_id` 的受管快照时，沿用创建它的工作区绑定。
+
+正常完成的命令结果保留输出、退出码、执行状态和用于回读或汇总的 ID。默认进程组清理细节可用 `workspace_tools(tool="audit_get", arguments={"operation_id": output_id})` 查看。命令的实际目录与所选目录不一致时，结果仍会报告实际目录。

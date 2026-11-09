@@ -3,6 +3,7 @@
 Only known redundant metadata is omitted. Unknown fields, failures, warnings,
 unknown execution state and cleanup uncertainty remain visible to the agent.
 """
+import posixpath
 import re
 
 from remote_workbench import audit
@@ -111,7 +112,7 @@ def _test_summary(result, command):
     return value
 
 
-def present_result(name, result, arguments=None):
+def present_result(name, result, arguments=None, *, workspace_cwd=None):
     value = dict(result)
     if name == "audit_get":
         # An explicit record read must retain its own original revision/origin.
@@ -124,12 +125,14 @@ def present_result(name, result, arguments=None):
             # Hiding a small successful report forces another model turn just
             # to recover the execution facts already available in this call.
     if isinstance(value.get('command_result'), dict):
-        value['command_result'] = present_result('exec_command', value['command_result'], arguments)
+        value['command_result'] = present_result('exec_command', value['command_result'], arguments,
+                                                 workspace_cwd=workspace_cwd)
     if name in {"workspace_switch", "workspace_use_local"}:
         redundant = {"thread_id", "created_at", "updated_at", "previous"}
         value = {key: item for key, item in value.items() if key not in redundant}
         if isinstance(value.get("initial"), dict):
-            value["initial"] = present_result("exec_command", value["initial"], arguments)
+            value["initial"] = present_result("exec_command", value["initial"], arguments,
+                                              workspace_cwd=workspace_cwd)
     elif name not in {"workspace_info", "workspace_resume", "workspace_history"}:
         value.pop("workspace_id", None)
         value.pop("revision", None)
@@ -140,18 +143,33 @@ def present_result(name, result, arguments=None):
             and value.get("exit_code") == 0 and value.get("execution_state") == "finished"
             and not value.get("error") and not value.get("timed_out")
             and task.get("cleanup_state") in {"not_started", "process_group_signalled"}):
-        # Origin/recovery details stay in the command record. Preserve explicit
-        # cleanup limits (including tree_confirmed=False), and unknown fields.
+        # Origin/recovery details stay in the command record.
         origin_fields = {"node", "boot_id", "version", "pid", "start_token", "task_id", "task_dir",
                          "backend", "timeout_seconds", "workload_pid", "pgid", "state", "reason", "exit_code"}
         value["remote_task"] = {key: item for key, item in task.items() if key not in origin_fields}
-        # Keep one actual path when launch and execution locations agree.
-        # Different origins, non-null identities and cleanup limits still matter.
         projected = value["remote_task"]
-        if projected.get("actual_cwd") and projected.get("launch_cwd") == projected["actual_cwd"]:
+        actual = projected.get("actual_cwd")
+        launch = projected.get("launch_cwd")
+        if actual and launch == actual:
             projected.pop("launch_cwd")
         if "origin_nonce" in projected and projected["origin_nonce"] is None:
             projected.pop("origin_nonce")
+        if (name in {"exec_command", "inspect_batch"} and value.get("output_id") and not value.get("stderr")
+                and not projected.get("origin_nonce") and projected.get("cleanup_state") == "process_group_signalled"
+                and projected.get("cleanup_scope") == "process_group" and projected.get("tree_confirmed") is False
+                and projected.get("hard_process_limit") is False):
+            # The ordinary process-group policy is documented on the tool.
+            # Keep non-default states and any new diagnostics on the wire.
+            for key in ("cleanup_state", "cleanup_scope", "tree_confirmed", "hard_process_limit"):
+                projected.pop(key)
+            requested = (arguments or {}).get("cwd")
+            expected = value.get("cwd")
+            if not expected and (workspace_cwd or (isinstance(requested, str) and requested.startswith("/"))):
+                expected = posixpath.normpath(posixpath.join(workspace_cwd or "/", requested or "."))
+            if actual and actual == expected and launch in (None, actual):
+                projected.pop("actual_cwd")
+        if not projected:
+            value.pop("remote_task")
     for key in ("stdout", "stderr"):
         if value.get(key) == "":
             value.pop(key)

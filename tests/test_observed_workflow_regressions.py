@@ -14,6 +14,7 @@ from tests.test_session_server import call, project
 
 def completed(**changes):
     value = {'exit_code': 0, 'execution_state': 'finished', 'stdout': 'unchanged output\n',
+             'output_id': 'a' * 32, 'operation_id': 'b' * 32,
              'remote_task': {'state': 'finished', 'reason': 'finished',
                 'origin_nonce': None, 'launch_cwd': '/selected/project/run',
                 'actual_cwd': '/selected/project/run', 'cleanup_state': 'process_group_signalled',
@@ -22,18 +23,24 @@ def completed(**changes):
     return value
 
 
-def test_success_projection_keeps_actual_location_limits_and_unmodified_original():
+def test_success_projection_keeps_output_ids_and_unmodified_original():
     source = completed()
     original = copy.deepcopy(source)
-    reply = present_result('exec_command', source)
-    task = reply['remote_task']
-    assert task['actual_cwd'] == '/selected/project/run'
-    assert not task['tree_confirmed'] and not task['hard_process_limit']
-    assert task['cleanup_state'] == 'process_group_signalled'
+    reply = present_result('exec_command', source, {'cwd': 'run'}, workspace_cwd='/selected/project')
+    assert 'remote_task' not in reply
+    assert reply['output_id'] == source['output_id'] and reply['operation_id'] == source['operation_id']
     assert reply['stdout'] == source['stdout'] and reply['exit_code'] == 0
     assert len(json.dumps(reply)) < len(json.dumps(source))
     assert source == original
     assert present_result('audit_get', source) == original
+    assert present_result('exec_command', source)['remote_task'] == {'actual_cwd': '/selected/project/run'}
+
+
+def test_success_with_stderr_keeps_cleanup_limits():
+    reply = present_result('exec_command', completed(stderr='unexpected diagnostic'))
+    assert reply['stderr'] == 'unexpected diagnostic'
+    assert reply['remote_task']['cleanup_state'] == 'process_group_signalled'
+    assert reply['remote_task']['tree_confirmed'] is False
 
 
 @pytest.mark.parametrize('change', [

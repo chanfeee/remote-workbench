@@ -39,8 +39,12 @@ async def test_native_text_preserves_command_facts_and_chat_scoped_output(projec
                            command=['printf', '<script>untrusted</script>\n'])
     text = text_result(wire)
     assert wire.meta is None
+    assert 'remote_task' not in text
     assert text['cwd'] == str(source) and text['exit_code'] == 0
     assert text['stdout'] == '<script>untrusted</script>\n'
+    record = await call(server, 'a', 'workspace_tools', tool='audit_get',
+                        arguments={'operation_id': text['output_id']})
+    assert record['remote_task']['cleanup_state'] == 'process_group_signalled'
     page = text_result(await wire_call(server, 'a', 'read_output', output_id=text['output_id'], max_bytes=256))
     assert page['content'] == text['stdout']
     other = await wire_call(server, 'b', 'read_output', output_id=text['output_id'], max_bytes=256)
