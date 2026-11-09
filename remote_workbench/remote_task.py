@@ -16,7 +16,7 @@ import threading
 import time
 
 if "login_spec" not in globals():
-    from remote_workbench.remote_shell import login_spec
+    from remote_workbench.remote_shell import login_spec, python_worker_spec
 
 
 def machine_identity():
@@ -349,9 +349,13 @@ def supervise_task(settings):
         with tempfile.TemporaryFile() as input_file:
             input_file.write(b'' if settings.get('batch') else data)
             input_file.seek(0)
-            spec = login_spec(command, settings["cwd"], preamble=settings.get("preamble", ""),
-                              markers=settings.get("markers"), trace=settings.get("trace", False),
-                              environment=settings.get("environment"))
+            if settings.get("python_source") is not None:
+                spec = python_worker_spec(settings["python_source"], settings["cwd"],
+                                          settings.get("markers"), settings.get("environment"))
+            else:
+                spec = login_spec(command, settings["cwd"], preamble=settings.get("preamble", ""),
+                                  markers=settings.get("markers"), trace=settings.get("trace", False),
+                                  environment=settings.get("environment"))
             streams = {name: subprocess.PIPE for name in ("stdout", "stderr")} if not foreground else {}
             child_environment = dict(os.environ, **spec["env_updates"])
             if completion is None:

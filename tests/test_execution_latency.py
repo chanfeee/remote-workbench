@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from remote_workbench import audit, remote_task, remote_worker
+from remote_workbench import audit, remote_reads, remote_task, remote_worker
 from remote_workbench.config import HostConfig
 from tests.test_session_server import call, project
 
@@ -160,7 +160,7 @@ def test_batch_read_rejects_managed_copy_without_opening_it(tmp_path, monkeypatc
 def test_bad_selection_fails_before_any_file_is_read(selection, monkeypatch):
     def forbidden(*args, **kwargs):
         pytest.fail('Invalid selection reached a file read')
-    monkeypatch.setattr(remote_worker, 'read_lines', forbidden)
+    monkeypatch.setattr(remote_reads, 'read_lines', forbidden)
     with pytest.raises(ValueError, match='explicit files'):
         remote_worker.read_selected({'files':selection})
 
@@ -209,6 +209,18 @@ async def test_primary_read_file_list_is_one_call_one_ssh_and_keeps_per_file_bou
     assert first['requested_path'] == 'value.txt' and second['requested_path'] == 'second.py'
     updated = await call(server, 'a', 'apply_patch', edits=[{'edit_id':second['edit_id'], 'new':['updated']}])
     assert updated['success'] and (source/'second.py').read_text() == 'updated\n'
+
+
+async def test_bound_text_reads_do_not_start_the_interactive_shell(project):
+    _, server, source, _ = project
+    await call(server, 'a', 'workspace_switch', host='a', cwd=str(source))
+    (source.parent / 'native-shell').write_text('#!/bin/sh\nexit 99\n')
+
+    one = await call(server, 'a', 'read_file', path='value.txt')
+    many = await call(server, 'a', 'read_file', path=['value.txt', 'missing.txt'], for_edit=True)
+
+    assert one['content'] == '1\toriginal'
+    assert many['files'][0]['edit_id'] and many['files'][1]['error'] == 'file_not_found'
 
 
 @pytest.mark.parametrize('paths', [[], ['value.txt','value.txt'], ['value.txt']*17])

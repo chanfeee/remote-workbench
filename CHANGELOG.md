@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.15 — faster text reads in bound chats
+
+- Run single and selected text reads through a dedicated worker that skips the interactive login shell while retaining supervision, output limits, and edit snapshot checks.
+
 ## 0.4.14 — report SSH multiplexing failures
 
 - Explain file descriptor transfer failures and invalidate cached connection health during directory validation.
