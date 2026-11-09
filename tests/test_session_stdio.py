@@ -55,7 +55,7 @@ async def test_compact_stdio_schema_scoping_without_operation_links(tmp_path):
         async with ClientSession(reader, writer) as client:
             await client.initialize()
             tools = await client.list_tools()
-            assert len(tools.tools) == 10
+            assert len(tools.tools) == 11
             assert "workspace_tools" in {t.name for t in tools.tools}
             first = await client.call_tool("workspace_info", meta={"threadId": "a"})
             assert first.structuredContent is None and len(first.content) == 1

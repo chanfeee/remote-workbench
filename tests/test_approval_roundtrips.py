@@ -22,7 +22,7 @@ async def test_only_source_read_operations_advertise_readonly_hints(tmp_path):
     server = create_server(router)
     tools = await server.list_tools()
     assert {tool.name for tool in tools} == TOOL_NAMES | {'workspace_tools'}
-    assert len(tools) == 10
+    assert len(tools) == 11
     for tool in tools:
         if tool.name in READ_ONLY_TOOL_NAMES:
             assert tool.annotations.readOnlyHint is True
@@ -161,7 +161,7 @@ async def test_actual_stdio_exports_hints_and_optional_selection_schema(tmp_path
         async with ClientSession(read, write) as client:
             await client.initialize()
             catalog = await client.list_tools()
-            assert len(catalog.tools) == 10
+            assert len(catalog.tools) == 11
             for tool in catalog.tools:
                 assert bool(tool.annotations and tool.annotations.readOnlyHint) == (tool.name in READ_ONLY_TOOL_NAMES)
             command = next(tool for tool in catalog.tools if tool.name == 'exec_command')

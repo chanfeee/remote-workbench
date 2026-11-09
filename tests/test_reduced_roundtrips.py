@@ -150,7 +150,7 @@ async def test_large_command_budget_does_not_make_selected_read_fail(project):
 async def test_patch_selection_is_exposed_on_primary_and_advanced_schemas(project):
     _, server, _, _ = project
     tools = {tool.name: tool for tool in await server.list_tools()}
-    assert len(tools) == 10
+    assert len(tools) == 11
     assert {'read_files', 'edit_files'} <= tools['apply_patch'].inputSchema['properties'].keys()
     described = await call(server, 'a', 'workspace_tools', tool='describe', arguments={'name': 'apply_patch'})
     assert {'read_files', 'edit_files'} <= described['inputSchema']['properties'].keys()

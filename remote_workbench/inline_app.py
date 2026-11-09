@@ -17,7 +17,7 @@ RESOURCE_URI = 'ui://remote-workbench/operation-v11.html'
 BATCH_RESOURCE_URI = 'ui://remote-workbench/batch-v1.html'
 HISTORICAL_RESOURCE_URIS = tuple(f'ui://remote-workbench/operation-v{version}.html'
                                  for version in (2, 4, 5, 6, 7, 8, 9, 10))
-CARD_TOOLS = frozenset({'exec_batch', 'review_activity', 'apply_patch'})
+CARD_TOOLS = frozenset({'exec_batch', 'inspect_batch', 'review_activity', 'apply_patch'})
 PREVIEW_BYTES = 4096
 
 
@@ -128,7 +128,8 @@ def install(server, router):
             with audit.scoped_root(router.audit_dir(state.workspace_id)):
                 for operation_id in operation_ids:
                     operation = await ssh_audit_get(operation_id)
-                    if operation.get('kind') != 'tool' or operation.get('tool') not in {'ssh_run', 'exec_command', 'exec_batch'}:
+                    if operation.get('kind') != 'tool' or operation.get('tool') not in {
+                            'ssh_run', 'ssh_inspect_batch', 'exec_command', 'exec_batch'}:
                         raise ToolError('Select command operation IDs returned by exec_command.')
                     if operation.get('status') == 'running':
                         raise ToolError('Review activity after the commands finish.')
@@ -167,7 +168,7 @@ def install(server, router):
     @server._mcp_server.call_tool(validate_input=False)
     async def call_with_card(name, arguments):
         blocks = await server.call_tool(name, arguments)
-        if name not in {'apply_patch', 'exec_batch'}:
+        if name not in {'apply_patch', 'exec_batch', 'inspect_batch'}:
             return blocks
         try:
             identity = get_codex_identity(server.get_context())

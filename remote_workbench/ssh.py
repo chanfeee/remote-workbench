@@ -137,6 +137,7 @@ class SSHExecutor:
         display_command: str | None = None,
         batch: bool = False,
         python_source: str | None = None,
+        direct_batch: bool = False,
     ) -> SSHResult:
         """Run a command on the remote host.
 
@@ -168,7 +169,7 @@ class SSHExecutor:
             stdin_bytes=len(input_data or b""), stdin_sha256=hashlib.sha256(input_data or b"").hexdigest())
         audit.add_child(audit.operation_id.get(), record_id)
         wrapped = self._wrap_command(command, cwd, record_id, trace, timeout, len(input_data or b""),
-                                     batch=batch, python_source=python_source)
+                                     batch=batch, python_source=python_source, direct_batch=direct_batch)
         if batch:
             audit.update(record_id, command_batch=json.loads(input_data))
         audit.update(record_id, wrapped_command=wrapped, shell_trace=trace)
@@ -556,7 +557,7 @@ class SSHExecutor:
 
     def _wrap_command(self, command: str, cwd: str, record_id: str = "", trace: bool = False,
                       timeout: int | None = None, stdin_bytes: int = 0, batch: bool = False,
-                      python_source: str | None = None) -> str:
+                      python_source: str | None = None, direct_batch: bool = False) -> str:
         """Start the configured account shell, without assuming its syntax."""
         from remote_workbench.remote_shell import python_command
         markers = None
@@ -568,7 +569,8 @@ class SSHExecutor:
         arguments = dict(command=command, cwd=cwd, preamble=self.config.preamble,
                          markers=markers, trace=trace, environment=environment,
                          policy=self.config.task_policy(), timeout=timeout or self.config.command_timeout,
-                         task_id=task_id, stdin_bytes=stdin_bytes, batch=batch, python_source=python_source)
+                         task_id=task_id, stdin_bytes=stdin_bytes, batch=batch,
+                         python_source=python_source, direct_batch=direct_batch)
         bootstrap = Path(__file__).with_name("remote_shell.py").read_text()
         if batch:
             bootstrap += '\nBATCH_RUNNER_SOURCE = ' + repr(Path(__file__).with_name('batch_runner.py').read_text())

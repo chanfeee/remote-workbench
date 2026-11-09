@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.17 — read-only command probes
+
+- Add `inspect_batch` for up to eight fixed `pwd` and literal `printf` probes on an existing binding. It returns one collapsed card and can skip approval in Codex writes mode.
+
 ## 0.4.16 — lower batch checkpoint latency
 
 - Sync each pre-dispatch checkpoint to a single private journal. Keep the atomic final snapshot and recover the last complete checkpoint if a batch is interrupted.

@@ -40,14 +40,16 @@ async def check():
             async with ClientSession(reader, writer) as client:
                 await client.initialize()
                 tools = await client.list_tools()
-                assert len(tools.tools) == 10
+                assert len(tools.tools) == 11
                 by_name = {tool.name: tool for tool in tools.tools}
                 assert 'Use exec_batch' in by_name['exec_command'].description
                 assert by_name['review_activity'].annotations.readOnlyHint
+                assert by_name['inspect_batch'].annotations.readOnlyHint
+                assert not (by_name['exec_batch'].annotations and by_name['exec_batch'].annotations.readOnlyHint)
                 assert 'Include already-known post-edit checks in command=' in by_name['apply_patch'].description
                 for tool in by_name.values():
                     meta = tool.meta or {}
-                    expected = RESOURCE_URI if tool.name in {'exec_batch', 'review_activity', 'apply_patch'} else None
+                    expected = RESOURCE_URI if tool.name in {'exec_batch', 'inspect_batch', 'review_activity', 'apply_patch'} else None
                     assert meta.get('ui', {}).get('resourceUri') == expected
                     assert meta.get('openai/outputTemplate') == expected
                 batch = (await client.read_resource(BATCH_RESOURCE_URI)).contents[0]

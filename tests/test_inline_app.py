@@ -147,6 +147,43 @@ async def test_ready_batch_binds_runs_and_returns_one_compact_card(project):
     assert step['streams']['stdout']['content'] == result['stdout']
 
 
+async def test_read_only_batch_uses_bound_target_and_returns_one_card(project):
+    router, server, source, _ = project
+    state = await call(server, 'a', 'workspace_switch', host='a', cwd=str(source))
+    # The fixed worker must run even if the interactive shell fails.
+    (source.parent / 'native-shell').write_text('#!/bin/sh\nexit 99\n')
+    literal = '$(touch forbidden) %n \\n'
+    wire = await wire_call(server, 'a', 'inspect_batch',
+        command={'commands': [['pwd'], ['printf', '%s\\n', literal], ['printf', '%s\n', 'plain']]})
+    result = text_result(wire)
+    assert result['exit_code'] == 0
+    assert result['stdout'] == (f'[command 1/3]\n{source}\n[command 2/3]\n{literal}\n'
+                                '[command 3/3]\nplain\n')
+    assert not (source / 'forbidden').exists()
+    card = wire.meta['remote-workbench/operation']
+    assert card['compact'] is True and len(card['steps'][0]['batch_steps']) == 3
+    assert router.registry.get_or_create('a').revision == state['revision']
+
+
+async def test_read_only_batch_rejects_disallowed_input_before_ssh(project, monkeypatch):
+    _, server, source, _ = project
+    await call(server, 'a', 'workspace_switch', host='a', cwd=str(source))
+
+    async def no_ssh(*args, **kwargs):
+        pytest.fail('Invalid or unbound inspect_batch attempted SSH')
+
+    monkeypatch.setattr('remote_workbench.ssh.asyncio.create_subprocess_exec', no_ssh)
+    for argv in (['touch', 'x'], ['/tmp/printf', '%s\\n', 'x'],
+                 ['printf', '%b', 'x'], ['pwd', '-L']):
+        refused = await wire_call(server, 'a', 'inspect_batch',
+            command={'commands': [['pwd'], argv]})
+        assert refused.isError and 'permits only' in refused.content[0].text
+    unbound = await wire_call(server, 'b', 'inspect_batch', command={'commands': [['pwd']]})
+    assert unbound.isError and 'no remote workspace' in unbound.content[0].text
+    wrong_target = await wire_call(server, 'a', 'inspect_batch', host='b', command={'commands': [['pwd']]})
+    assert wrong_target.isError and 'Unknown argument' in wrong_target.content[0].text
+
+
 async def test_process_failure_remains_visible_in_text(project):
     _, server, source, _ = project
     text = text_result(await wire_call(server, 'a', 'exec_command', host='a', cwd=str(source),
@@ -229,7 +266,7 @@ async def test_stdio_binds_activity_and_diff_cards_and_keeps_archived_resources(
         async with ClientSession(read, write) as client:
             await client.initialize()
             tools = (await client.list_tools()).tools
-            assert len(tools) == 10
+            assert len(tools) == 11
             for tool in tools:
                 meta = tool.meta or {}
                 expected = inline_app.RESOURCE_URI if tool.name in inline_app.CARD_TOOLS else None

@@ -32,13 +32,14 @@ from remote_workbench.call_arguments import selected_files, validate_output_budg
 from remote_workbench.edit_spec import PreparedEdit
 from remote_workbench.command_spec import Command, CommandBatch, normalize_arguments
 from remote_workbench.inline_app import install as install_inline_app
+from remote_workbench.tools.commands import ssh_inspect_batch
 from remote_workbench.tool_interface import COMMAND_BATCH_GUIDANCE, INSTRUCTIONS, READ_ONLY_TOOL_NAMES, TOOL_NAMES, present_result
 
 # Read-only checks and controls must remain available while a foreground
 # command owns the workspace lease. Remote checks may observe intermediate
 # files while a command is running; they never mutate the workspace.
 _READ_ONLY_REMOTE_TOOLS = {"workspace_snapshot", "fetch_image",
-                           "read_file", "list_dir", "grep", "find_files", "git_status", "git_diff"}
+                           "inspect_batch", "read_file", "list_dir", "grep", "find_files", "git_status", "git_diff"}
 _SESSION_LOCAL_TOOLS = {"workspace_resume", "workspace_note"}
 _UNLOCKED_TOOLS = _LOCAL_TOOLS | _JOB_CONTROL_TOOLS | {
     "workspace_info", "workspace_history", "resolve_operation"
@@ -637,6 +638,13 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
                 ('Run a ready group of 2–32 sequential argv commands (prefer up to 8) and return one '
                  'collapsed inline card with the result. Pass host and absolute cwd to bind and run in '
                  'the same call. Omit host when already bound. Stop on error by default.'), execute)
+
+    register('inspect_batch', inspect.signature(ssh_inspect_batch, eval_str=True),
+        r'Read-only group of 1–8 fixed probes on the bound target. Pass command={commands:[argv,...]}. '
+        r'Only pwd and printf with format %s\n and one literal value (up to 512 bytes) are accepted. '
+        'Returns one collapsed card. The tool uses the existing SSH connection and requires a bound target.',
+        make_executor(router, 'inspect_batch', ssh_inspect_batch, read_selection))
+
     @server.tool(structured_output=False)
     async def workspace_tools(tool: str, arguments: dict | None = None, ctx: Context = None) -> str:
         """Advanced tools by name: jobs, recovery, notes, search/edits. tool='describe', arguments={name:'start_job'} returns just that schema; omit name for available names. Normal tasks use exec_command, review_activity or apply_patch directly."""
