@@ -580,7 +580,7 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
                 "Include already-known post-edit checks in command={commands:[argv,...]} for one edit/check result (prefer up to 8 checks). Shell text/argv also work. "
                 "read_files/edit_files explicitly return files after edits/checks; edit_files includes fresh guarded IDs. "
                 "For patch text, pass host and absolute cwd to bind and apply in one call. "
-                "check_only cannot run command. The inline card shows the patch diff. "
+                "check_only cannot run command. The inline card shows the patch diff and verification status. "
                 "Check output defaults to a 4 KiB preview. Full records are saved.")
             server.tool(structured_output=False)(structured_apply_patch)
             tool_metadata = server._tool_manager.get_tool("apply_patch")
@@ -609,7 +609,7 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
     for name, function, description in TOOLS:
         if name == 'exec_command':
             description = ('Use inspect_batch for supported read-only probes. '
-                'Use exec_batch for other ready groups with an inline card. '
+                'Use exec_batch for other ready groups. '
                 'Optional host + absolute cwd binds and runs together; repeat the same target without rebinding. '
                 'read_files/edit_files return selected files after confirmed completion, including nonzero exits; edit_files includes guarded edit_ids. '
                 'Paths use the command cwd; max_bytes defaults to 4 KiB for the command result and each selected file. stdin is exact text. '
@@ -642,8 +642,8 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
                 for param in public.parameters.values() if param.name != 'stdin'])
             register('exec_batch', batch_signature,
                 ('Use inspect_batch for supported read-only probes. Run other ready groups of 2–32 '
-                 'sequential argv commands (prefer up to 8) and return one '
-                 'collapsed inline card with the result. Pass host and absolute cwd to bind and run in '
+                 'sequential argv commands (prefer up to 8) and return text. '
+                 'Pass host and absolute cwd to bind and run in '
                  'the same call. Omit host when already bound. Stop on error by default. Output preview defaults to 4 KiB. '
                  'Ordinary completion uses process-group cleanup without a verified process tree or hard process cap.'), execute)
 

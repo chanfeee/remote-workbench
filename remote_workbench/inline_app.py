@@ -13,11 +13,11 @@ from remote_workbench.presentation import parse_unified_diff, summarize_record
 from remote_workbench.session_context import get_codex_identity
 from remote_workbench.tools.audit import ssh_audit_get
 
-RESOURCE_URI = 'ui://remote-workbench/operation-v11.html'
+RESOURCE_URI = 'ui://remote-workbench/operation-v12.html'
 BATCH_RESOURCE_URI = 'ui://remote-workbench/batch-v1.html'
 HISTORICAL_RESOURCE_URIS = tuple(f'ui://remote-workbench/operation-v{version}.html'
-                                 for version in (2, 4, 5, 6, 7, 8, 9, 10))
-CARD_TOOLS = frozenset({'exec_batch', 'review_activity', 'apply_patch'})
+                                 for version in (2, 4, 5, 6, 7, 8, 9, 10, 11))
+CARD_TOOLS = frozenset({'review_activity', 'apply_patch'})
 PREVIEW_BYTES = 4096
 
 
@@ -55,6 +55,18 @@ def _step(result, tool, command, *, operation=None, source=None, preview_bytes=P
                 executed=result.get('executed'), timed_out=bool(result.get('timed_out') or source.get('timed_out')
                     or source.get('status') == 'timeout'), cleanup_state=remote_task.get('cleanup_state'),
                 error=result.get('error'), diff_summary=diff_summary, streams=streams)
+    if step['error']:
+        if isinstance(result.get('message'), str):
+            step['message'] = result['message'][:512]
+        if step['error'] == 'partial_apply':
+            for key in ('applied_paths', 'pending_paths'):
+                paths = result.get(key)
+                if isinstance(paths, list):
+                    step[key] = [path[:256] for path in paths[:8] if isinstance(path, str)]
+    summary = result.get('test_summary')
+    if tool == 'exec_command' and isinstance(summary, dict):
+        step['test_summary'] = {key: summary[key] for key in ('status', 'passed', 'reported_skips', 'executed')
+                                if key in summary}
     if tool == 'exec_command' and isinstance(command, dict):
         outcomes = {entry['index']: entry for entry in result.get('steps') or []}
         lines, batch_steps = [], []
@@ -168,22 +180,13 @@ def install(server, router):
     @server._mcp_server.call_tool(validate_input=False)
     async def call_with_card(name, arguments):
         blocks = await server.call_tool(name, arguments)
-        if name not in {'apply_patch', 'exec_batch'}:
+        if name != 'apply_patch':
             return blocks
         try:
             identity = get_codex_identity(server.get_context())
             state = router.registry.get_or_create(identity.thread_id)
             with audit.scoped_root(router.audit_dir(state.workspace_id)):
-                if name == 'apply_patch':
-                    return attach_patch_card(blocks, arguments or {})
-                result = json.loads(blocks[0].text)
-                operation_id = result.get('operation_id')
-                if operation_id and result.get('output_id') and result.get('executed') is not False:
-                    operation = _record(operation_id)
-                    command = (operation.get('arguments') or {}).get('command')
-                    step = _step(result, 'exec_command', command, operation=operation)
-                    return _card_result(blocks, [step], operation_id, compact=True)
-                return blocks
+                return attach_patch_card(blocks, arguments or {})
         except (OSError, ValueError, TypeError, KeyError, IndexError, AttributeError):
             # Completed work must stay a valid result even if its preview is unavailable.
             return blocks

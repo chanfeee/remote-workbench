@@ -135,7 +135,7 @@ async def test_review_activity_groups_separate_commands_and_a_batch_without_ssh(
     assert other.isError
 
 
-async def test_ready_batch_binds_runs_and_returns_one_compact_card(project):
+async def test_ready_batch_binds_and_keeps_card_available_on_demand(project):
     router, server, source, _ = project
     commands = [['printf', f'check {index}\n'] for index in range(1, 9)]
     wire = await wire_call(server, 'ready', 'exec_batch', host='a', cwd=str(source),
@@ -145,7 +145,9 @@ async def test_ready_batch_binds_runs_and_returns_one_compact_card(project):
     assert result['stdout'].endswith('[command 8/8]\ncheck 8\n')
     state = router.registry.get_or_create('ready')
     assert (state.host, state.cwd, state.revision) == ('a', str(source), 1)
-    card = wire.meta['remote-workbench/operation']
+    assert wire.meta is None
+    review = await wire_call(server, 'ready', 'review_activity', operation_ids=[result['operation_id']])
+    card = review.meta['remote-workbench/operation']
     assert card['compact'] is True
     step, = card['steps']
     assert step['operation_id'] == result['operation_id']

@@ -175,6 +175,29 @@ const command={tool:'exec_command',host:'server',cwd:'/run',command:hostile,stat
   assert(compactMarkup.includes('<details class="activity-group"><summary>查看命令与输出</summary>'));
   assert(compactMarkup.includes('class="section-count">2</span>'));
   assert(compactMarkup.includes('second saved command')&&!compactMarkup.includes('<pre'));
+  const edited={...patch,check_only:false};
+  const checked=wrap([edited,{...command,streams:{},batch_steps:[
+    {state:'finished',exit_code:0},{state:'finished',exit_code:7},{state:'not_run',exit_code:null}
+  ],exit_code:7}]);
+  checked._meta['remote-workbench/operation'].compact=true;
+  const verification=boot({call_tool_result:checked});
+  const verificationMarkup=verification.el('activity').innerHTML;
+  assert(verification.el('review').innerHTML.includes('1 个远程文件'));
+  assert(verificationMarkup.includes('验证')&&verificationMarkup.includes('1 项通过 · 1 项失败 · 未执行'));
+  assert(verificationMarkup.includes('role="alert"')&&verificationMarkup.includes('第 2 项 失败'));
+  assert(verificationMarkup.includes('<details class="activity-group">'));
+  const unverified=boot({call_tool_result:wrap([edited])});
+  assert(unverified.el('activity').innerHTML.includes('未运行'));
+  const skipped=boot({call_tool_result:wrap([edited,{...command,
+    test_summary:{status:'completed',executed:false,passed:0,reported_skips:2}
+  }])});
+  assert(skipped.el('activity').innerHTML.includes('2 个测试跳过'));
+  assert(!skipped.el('activity').innerHTML.includes('1 项通过'));
+  const blocked=boot({call_tool_result:wrap([{tool:'apply_patch',executed:false,
+    error:'compute_review_required',message:'review <unsafe> command'}])});
+  assert(blocked.el('review').innerHTML.includes('role="alert"'));
+  assert(blocked.el('review').innerHTML.includes('需要确认'));
+  assert(blocked.el('review').innerHTML.includes('review &lt;unsafe&gt; command'));
   // Optional actual MCP wire metadata from the Python integration test.
   if(process.argv[2]){
     const fixture=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));

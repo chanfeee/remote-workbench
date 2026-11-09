@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.23 — show edit diffs and verification by default
+
+- Keep ordinary command batches text-only and make command cards available through `review_activity`.
+- Show verification counts next to patch diffs. Surface failures, incomplete execution, and decisions above the folded command output.
+
 ## 0.4.22 — text-only read-only probes by default
 
 - Return a compact text preview from `inspect_batch`. Saved operations can still be opened as a card on demand.

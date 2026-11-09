@@ -21,7 +21,7 @@ TOOL_NAMES = frozenset({
 READ_ONLY_TOOL_NAMES = frozenset({"read_file", "read_output", "fetch_image", "inspect_batch", "review_activity"})
 
 CALL_SOURCE_INSTRUCTIONS = (
-    'Use supplied schemas; print returned text once. '
+    'Use schemas; print tool text once. '
     'Full output/diffs stay local; read_output pages them. Advanced tools: workspace_tools.'
 )
 
@@ -35,13 +35,14 @@ COMMAND_BATCH_GUIDANCE = (
 # Clients may repeat server instructions in every deferred tool description.
 # Keep shared boundaries here; parameter details belong to each tool's schema.
 INSTRUCTIONS = (
-    'New chats start local. Give host and absolute cwd on first use; reuse bindings. '
+    'New chats start local. Give host and absolute cwd; reuse bindings. '
     'Native tools stay local; no remote Codex CLI. '
-    'Reuse manual SSH authentication; stop on identity/SSH failure, never reauthenticate or fall back locally. '
+    'Use manual SSH; on identity/SSH failure stop without reauth or local fallback. '
     'Heavy/parallel compute, scheduler and runtime/spawn tests require prior user confirmation of command/concurrency/environment, then compute_review. '
     'Default to inspect_batch for supported read-only probes, exec_batch for other groups. '
     'Edit and check with apply_patch. '
-    'Inline cards for edits and exec_batch; inspect_batch returns text. '
+    'Inline cards show diffs and checks. Flag failures, blockers and decisions separately. '
+    'Report major actions. '
     + CALL_SOURCE_INSTRUCTIONS
 )
 

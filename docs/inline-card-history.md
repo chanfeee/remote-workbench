@@ -1,5 +1,9 @@
 # Batch cards and historical results
 
+## 0.4.23 edit diffs and verification
+
+Routine command tools return text. Use `review_activity` to show a command card on demand. The patch card shows the diff and verification summary, with separate notices for failures and uncertain outcomes.
+
 ## 0.4.12 batch execution with inline results
 
 `exec_batch` returns the compact card with the original command result. The

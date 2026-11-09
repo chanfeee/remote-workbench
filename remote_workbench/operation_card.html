@@ -66,18 +66,22 @@ button:disabled{opacity:.6;cursor:default}
   function outcome(item){
     const state=String(item.state || '').toLowerCase();
     let kind;
-    if(item.executed===false||state==='not_run')kind='not_run';
+    if(item.error==='compute_review_required')kind='decision';
+    else if(item.executed===false||state==='not_run')kind='not_run';
     else if(['cancellation_requested','cancel_requested','cancelling'].includes(state))kind='cancelling';
     else if(['unknown','remote_state_unknown','cancellation_unconfirmed'].includes(state)||item.cleanup_state==='unconfirmed')kind='unknown';
     else if(item.timed_out||['timeout','timed_out'].includes(state))kind='timeout';
     else if(['cancelled','canceled'].includes(state))kind='cancelled';
     else if(['running','starting','queued'].includes(state))kind='running';
-    else if(item.error||['failed','rejected'].includes(state)||(item.exit_code!=null&&item.exit_code!==0))kind='failed';
+    else if(item.error||item.test_summary?.status==='failed'||['failed','rejected'].includes(state)||
+            (item.exit_code!=null&&item.exit_code!==0))kind='failed';
+    else if(item.test_summary?.status==='completed')kind='unverified';
     else if(['finished','completed','success','checked'].includes(state)&&
             (item.tool==='apply_patch'||Number.isInteger(item.exit_code)))kind='complete';
     else kind='unknown';
     const labels={complete:'已完成',failed:'失败',unknown:'状态未知',timeout:'已超时',
-      cancelled:'已取消',cancelling:'取消待确认',running:'运行中',not_run:'未执行'};
+      cancelled:'已取消',cancelling:'取消待确认',running:'运行中',not_run:'未执行',
+      decision:'未执行 · 需要确认',unverified:item.test_summary?.executed ? '测试结果待核对' : '没有测试通过记录'};
     return {kind,label:(item.timed_out&&kind==='unknown'?'已超时 · ':'')+labels[kind]};
   }
   function createReview(root){
@@ -106,7 +110,10 @@ button:disabled{opacity:.6;cursor:default}
     const render = (payload) => {
       if (!payload) return;
       if (!payload.success) {
-        root.innerHTML = `<div class="error">${escapeHtml([payload.state_label,payload.error || payload.message || "操作失败"].filter(Boolean).join(' · '))}</div>`;
+        const paths = (label, names) => names?.length ? label + names.join('、') : '';
+        const details = [payload.state_label, payload.error || "操作失败", payload.message,
+          paths('已应用 ', payload.applied_paths), paths('待处理 ', payload.pending_paths)];
+        root.innerHTML = `<div class="error" role="alert">${details.filter(Boolean).map(escapeHtml).join('<br>')}</div>`;
         return;
       }
       const files = Array.isArray(payload.files) ? payload.files : [];
@@ -136,9 +143,12 @@ button:disabled{opacity:.6;cursor:default}
         return `<pre id="rwb-output-${payload.step_index}-diff">${diffLines(data?.content ?? diff)}</pre>${moreButton(payload.step_index, "diff", data?.truncated ?? payload.diff_truncated)}`;
       })}</details>` : "";
       const foot = payload.files_truncated ? `<div class="foot">文件列表已截断</div>` : "";
+      const stateNotice = payload.state_label
+        ? `<div class="error" role="alert">${escapeHtml(payload.state_label)}</div>` : '';
       root.innerHTML = `
+        ${stateNotice}
         <header class="header">
-          <span class="title">${payload.state_label ? escapeHtml(payload.state_label)+" · " : ""}${payload.check_only ? "预览 · " : ""}${fileCount} 个远程文件${payload.partial ? "（片段）" : ""}</span>
+          <span class="title">${payload.check_only ? "预览 · " : ""}${fileCount} 个远程文件${payload.partial ? "（片段）" : ""}</span>
           <span class="workspace">${escapeHtml(payload.host)} · ${escapeHtml(payload.cwd || "")}</span>
           <span class="totals"><span class="add">+${payload.additions ?? 0}</span> <span class="del">-${payload.deletions ?? 0}</span></span>
         </header>
@@ -196,20 +206,45 @@ button:disabled{opacity:.6;cursor:default}
       }
       const reads = Array.isArray(payload.reads) ? payload.reads : [];
       const commands = Array.isArray(payload.commands) ? payload.commands : [];
-      const statuses=commands.map(outcome);
+      const checks = payload.verification ? commands.flatMap(command =>
+        command.batch_steps?.length ? command.batch_steps : [command]) : commands;
+      const statuses=checks.map(outcome);
       const failures = reads.filter((item) => item.success === false).length +
                        statuses.filter(item=>['failed','timeout'].includes(item.kind)).length;
-      const notice=['unknown','cancelling','running','timeout','cancelled','not_run'].map(kind=>statuses.find(item=>item.kind===kind)).find(Boolean);
-      const statusLabel=[failures?`${failures} 项失败`:'',notice?.label].filter(Boolean).join(' · ')||'已完成';
+      const outcomes = payload.verification ? [...statuses, ...commands.map(outcome)] : statuses;
+      const notice=['decision','unknown','cancelling','running','timeout','cancelled','not_run','unverified']
+        .map(kind=>outcomes.find(item=>item.kind===kind)).find(Boolean);
+      const passed = statuses.filter(item => item.kind === 'complete').length;
+      const tests = payload.verification ? commands.flatMap(command => {
+        const summary = command.test_summary;
+        return summary ? [Number.isInteger(summary.passed) && summary.passed > 0 ? `${summary.passed} 个测试通过` : '',
+          Number.isInteger(summary.reported_skips) && summary.reported_skips > 0
+            ? `${summary.reported_skips} 个测试跳过` : ''] : [];
+      }) : [];
+      const statusLabel=[payload.verification && passed ? `${passed} 项通过` : '',
+        failures?`${failures} 项失败`:'',notice?.label,...tests].filter(Boolean).join(' · ') ||
+        (payload.verification && !checks.length ? '未运行' : '已完成');
       const cwdNote = payload.cwd_count > 1 ? ` · ${payload.cwd_count} 个目录` : "";
       const list = `<ul class="list">${commands.map(item=>renderCommand({...item,show_cwd:payload.cwd_count>1})).join("")}</ul>`;
+      const alerts = payload.verification ? commands.map(command => {
+        const status = outcome(command);
+        if (status.kind === 'complete') return '';
+        const failedSteps = (command.batch_steps || []).flatMap((step, index) => {
+          const state = outcome(step);
+          return state.kind === 'complete' ? [] : [`第 ${index + 1} 项 ${state.label}`];
+        });
+        const diagnostic = command.message || command.error || command.stderr?.trim().slice(0, 480);
+        return `<div class="error" role="alert">${[status.label, ...failedSteps, diagnostic]
+          .filter(Boolean).map(escapeHtml).join('<br>')}</div>`;
+      }).join('') : '';
       root.innerHTML = `
         <header class="header">
-          <span class="title">命令 <span class="section-count">${commands.reduce((count, item) => count + (item.batch_steps?.length || 1), 0)}</span></span>
+          <span class="title">${payload.verification ? '验证' : '命令'} <span class="section-count">${commands.reduce((count, item) => count + (item.batch_steps?.length || 1), 0)}</span></span>
           <span class="workspace">${escapeHtml(payload.host)} · ${escapeHtml(payload.cwd || "")}${cwdNote}</span>
           <span class="status ${failures ? "failed" : notice ? "warning" : ""}">${statusLabel}</span>
         </header>
-        ${payload.compact ? `<details class="activity-group"><summary>查看命令与输出</summary>${list}</details>` : list}
+        ${alerts}
+        ${!commands.length ? '' : payload.compact ? `<details class="activity-group"><summary>查看命令与输出</summary>${list}</details>` : list}
         `;
     };
 
@@ -333,7 +368,8 @@ button:disabled{opacity:.6;cursor:default}
       const text=data?.content || '',chunks=text.includes('diff --git ')?text.split(/(?=^diff --git )/m).filter(x=>x.startsWith('diff --git ')):[text];
       const perFile=Boolean(data&&!data.truncated&&rows.length&&chunks.length===rows.length);
       const files=rows.map((f,i)=>({path:f.path,additions:f.added,deletions:f.deleted,diff:perFile?chunks[i]:'',diff_truncated:!!data?.truncated}));
-      reviewView.render({success:!step.error,error:step.error,host:step.host || '',cwd:step.cwd || '',files,
+      reviewView.render({success:!step.error,error:step.error,message:step.message,
+        applied_paths:step.applied_paths,pending_paths:step.pending_paths,host:step.host || '',cwd:step.cwd || '',files,
         files_changed:files.length,additions:summary?.added,deletions:summary?.deleted,diff:text,
         diff_truncated:!!data?.truncated,partial:summary&&!summary.complete,check_only:step.check_only,
         state_label:status.kind==='complete'?'':status.label,step_index:patch});
@@ -342,9 +378,12 @@ button:disabled{opacity:.6;cursor:default}
       stdout:s.streams?.stdout?.content || '',stderr:s.streams?.stderr?.content || '',
       stdout_truncated:!!s.streams?.stdout?.truncated,stderr_truncated:!!s.streams?.stderr?.truncated,
       truncated:!!(s.streams?.stdout?.truncated||s.streams?.stderr?.truncated)}));
-    activityRoot.hidden=!commands.length;
-    if(commands.length)activityView.render({success:true,reads:[],commands,compact:payload.compact===true,
-      host:commands[0].host || '',cwd:commands[0].cwd || '',cwd_count:new Set(commands.map(s=>s.cwd)).size});
+    const patchStep = steps[patch];
+    const verification = Boolean(patchStep && !patchStep.check_only && !patchStep.error);
+    const context = commands[0] || patchStep;
+    activityRoot.hidden=!commands.length && !verification;
+    if(!activityRoot.hidden)activityView.render({success:true,reads:[],commands,verification,compact:payload.compact===true,
+      host:context.host || '',cwd:context.cwd || '',cwd_count:new Set(commands.map(s=>s.cwd)).size});
     contentRoot.removeAttribute('data-pending');needsResize=true;observedHeight=undefined;
     return true;
   }

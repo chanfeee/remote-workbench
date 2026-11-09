@@ -49,7 +49,7 @@ async def check():
                 assert 'Include already-known post-edit checks in command=' in by_name['apply_patch'].description
                 for tool in by_name.values():
                     meta = tool.meta or {}
-                    expected = RESOURCE_URI if tool.name in {'exec_batch', 'review_activity', 'apply_patch'} else None
+                    expected = RESOURCE_URI if tool.name in {'review_activity', 'apply_patch'} else None
                     assert meta.get('ui', {}).get('resourceUri') == expected
                     assert meta.get('openai/outputTemplate') == expected
                 batch = (await client.read_resource(BATCH_RESOURCE_URI)).contents[0]

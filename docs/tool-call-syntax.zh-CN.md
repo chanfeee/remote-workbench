@@ -89,7 +89,7 @@
 
 ## 客户端与内容边界
 
-单条命令使用 `exec_command(command=["python3","-m","unittest","-v"])`。Shell 文本支持管道和环境激活。将下面的参数传给 `exec_batch` 可一次执行同一目录的多项已确定检查，并随执行结果返回一张折叠的卡片。首次可以同时传入 `host` 和绝对 `cwd`。对于分开的 `exec_command` 调用，可按需用返回的 `operation_id` 调用 `review_activity(operation_ids=[...])`，单条也可汇总。每组建议最多 8 条命令。
+单条命令使用 `exec_command(command=["python3","-m","unittest","-v"])`。Shell 文本支持管道和环境激活。将下面的参数传给 `exec_batch` 可一次执行同一目录的多项已确定检查，并返回精简文本。首次可以同时传入 `host` 和绝对 `cwd`。需要查看命令卡片时，可用返回的 `operation_id` 调用 `review_activity(operation_ids=[...])`，单条也可汇总。每组建议最多 8 条命令。
 
 ```json
 {"command":{"commands":[["git","status","--short"],["git","diff","--check"],["python3","-m","unittest","-v"]]},"timeout":30}
@@ -125,7 +125,7 @@ python -m remote_workbench.call_source docs/examples/edit-request.json
 
 - `git diff --worktree-raw -- 路径...` 可比较 1–4 个明确指定的已跟踪文本文件。比较暂存区 blob 和工作区原始字节，支持已删除文件，每个文件最多 256 KiB、4096 行。Git 的过滤器、外部 diff 和模式变更由普通 `git diff` 处理，后者仍需审批。
 
-原始补丁可用 `apply_patch(host=..., cwd=..., patch=..., command=..., read_files=...)` 在一次调用里绑定目标、应用补丁、执行检查并回读文件。这个调用仍需审批。内联卡展示补丁 diff，后续检查的命令和输出默认折叠。使用已有 `edit_id` 的受管快照时，沿用创建它的工作区绑定。
+原始补丁可用 `apply_patch(host=..., cwd=..., patch=..., command=..., read_files=...)` 在一次调用里绑定目标、应用补丁、执行检查并回读文件。这个调用仍需审批。内联卡展示补丁 diff 和验证结果，命令和输出默认折叠。失败、状态未知或需要确认的情况单独显示。使用已有 `edit_id` 的受管快照时，沿用创建它的工作区绑定。
 
 正常完成的命令结果保留输出、退出码、执行状态和用于回读或汇总的 ID。默认进程组清理细节可用 `workspace_tools(tool="audit_get", arguments={"operation_id": output_id})` 查看。命令的实际目录与所选目录不一致时，结果仍会报告实际目录。
 
