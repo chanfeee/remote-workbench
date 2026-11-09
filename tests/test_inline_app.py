@@ -357,6 +357,19 @@ async def test_card_preview_is_bounded_and_respects_the_text_budget(project):
     assert 'x' * 9000 in full['content']
 
 
+async def test_default_batch_preview_keeps_full_output_available(project):
+    _, server, source, _ = project
+    commands = {'commands': [['python3', '-c', "print('x'*7000)"], ['printf', 'last\n']]}
+    args = dict(host='a', cwd=str(source), command=commands)
+    result = text_result(await wire_call(server, 'a', 'exec_batch', **args))
+    assert result['truncated'] and len(result['stdout'].encode()) <= 4096
+    assert 'remote_task' not in result and result['exit_code'] == 0
+    full = text_result(await wire_call(server, 'a', 'read_output', output_id=result['output_id']))
+    assert 'x' * 7000 in full['content'] and full['content'].endswith('last\n')
+    expanded = text_result(await wire_call(server, 'a', 'exec_batch', **args, max_bytes=8192))
+    assert 'x' * 7000 in expanded['stdout'] and not expanded.get('truncated')
+
+
 async def test_stdio_binds_activity_and_diff_cards_and_keeps_archived_resources(tmp_path):
     config = tmp_path / 'hosts.yaml'
     config.write_text('hosts:\n  test:\n    ssh_host: never-connect.invalid\n')

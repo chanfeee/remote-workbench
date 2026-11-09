@@ -128,3 +128,5 @@ python -m remote_workbench.call_source docs/examples/edit-request.json
 原始补丁可用 `apply_patch(host=..., cwd=..., patch=..., command=..., read_files=...)` 在一次调用里绑定目标、应用补丁、执行检查并回读文件。这个调用仍需审批。使用已有 `edit_id` 的受管快照时，沿用创建它的工作区绑定。
 
 正常完成的命令结果保留输出、退出码、执行状态和用于回读或汇总的 ID。默认进程组清理细节可用 `workspace_tools(tool="audit_get", arguments={"operation_id": output_id})` 查看。命令的实际目录与所选目录不一致时，结果仍会报告实际目录。
+
+默认优先走支持的 `inspect_batch` 只读路径。首次使用已明确的远端目标时，在操作调用里一起给出 `host` 和绝对 `cwd`。通用命令、只读探测和补丁后检查默认预览最多 4 KiB。通用命令和补丁后检查可用 `max_bytes` 调高预览额度，或按需用 `read_output` 回读完整记录。

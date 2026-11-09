@@ -9,7 +9,9 @@ import sys
 import uuid
 
 from remote_workbench import audit, job_collector
-from remote_workbench.call_arguments import selected_files, validate_call_arguments, validate_output_budget
+from remote_workbench.call_arguments import (
+    COMMAND_PREVIEW_BYTES, selected_files, validate_call_arguments, validate_output_budget,
+)
 from remote_workbench.tool_runtime import authentication_refusal
 from remote_workbench.workspace import bind_tool
 from remote_workbench.workspace_registry import WorkspaceTarget
@@ -168,13 +170,13 @@ def make_executor(router, name, function, read_selection):
         after = None
         selected = (selected_files(arguments.pop('read_files', None), arguments.pop('edit_files', None))
                     if name in {'exec_command', 'apply_patch'} else [])
-        selection_budget = arguments.get('max_bytes', 16384)
+        selection_budget = arguments.get('max_bytes', COMMAND_PREVIEW_BYTES)
         if selected:
             validate_output_budget(selection_budget)
         if name == 'apply_patch':
             after_command = arguments.pop('command', None)
             options = {k: arguments.pop(k, default) for k, default in
-                       [('timeout', None), ('max_bytes', 16384), ('compute_review', None)]}
+                       [('timeout', None), ('max_bytes', COMMAND_PREVIEW_BYTES), ('compute_review', None)]}
             if after_command is not None:
                 if arguments.get('check_only'):
                     raise ValueError('check_only cannot run command')

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.21 — compact execution defaults
+
+- Prefer read-only probes, inline target selection, and combined patch checks in the session tool guidance.
+- Limit default command output previews to 4 KiB. Full output remains available through the audit spool.
+
 ## 0.4.20 — compact successful command replies
 
 - Omit the usual process-group cleanup metadata and redundant cwd from successful command replies. Keep the original audit record, output IDs, and failure diagnostics.

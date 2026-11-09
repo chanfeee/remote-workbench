@@ -35,12 +35,13 @@ COMMAND_BATCH_GUIDANCE = (
 # Clients may repeat server instructions in every deferred tool description.
 # Keep shared boundaries here; parameter details belong to each tool's schema.
 INSTRUCTIONS = (
-    'New chats start local; explicit host/cwd selects the actual directory, never a project copy. '
+    'New chats start local. For the first remote action give host and absolute cwd; reuse bindings. '
     'Native tools stay local; no remote Codex CLI. '
     'Reuse manual SSH authentication; stop on identity/SSH failure, never reauthenticate or fall back locally. '
     'Heavy/parallel compute, scheduler and runtime/spawn tests require prior user confirmation of command/concurrency/environment, then compute_review. '
-    'Inline cards use inspect_batch for fixed probes and exec_batch for other batches. '
-    'Records cover commands, input/output and managed diffs, not arbitrary shell writes. '
+    'Default to inspect_batch for supported read-only probes, exec_batch for other groups. '
+    'Bundle patch checks. '
+    'Inline cards. Audit covers command I/O and managed diffs. '
     + CALL_SOURCE_INSTRUCTIONS
 )
 

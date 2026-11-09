@@ -28,7 +28,7 @@ from remote_workbench.workspace import TOOLS, Workspace, bind_tool
 from remote_workbench.workspace_router import SessionRouter, default_state_dir
 from remote_workbench.workspace_snapshot import collect as collect_snapshot
 from remote_workbench import baseline
-from remote_workbench.call_arguments import selected_files, validate_output_budget
+from remote_workbench.call_arguments import COMMAND_PREVIEW_BYTES, selected_files, validate_output_budget
 from remote_workbench.edit_spec import PreparedEdit
 from remote_workbench.command_spec import Command, CommandBatch, normalize_arguments
 from remote_workbench.inline_app import install as install_inline_app
@@ -44,7 +44,7 @@ _SESSION_LOCAL_TOOLS = {"workspace_resume", "workspace_note"}
 _UNLOCKED_TOOLS = _LOCAL_TOOLS | _JOB_CONTROL_TOOLS | {
     "workspace_info", "workspace_history", "resolve_operation"
 } | _READ_ONLY_REMOTE_TOOLS | _SESSION_LOCAL_TOOLS
-_BUDGETS = {"exec_command": 16384, "read_file": 4096, "patch_file": 4096,
+_BUDGETS = {"exec_command": COMMAND_PREVIEW_BYTES, "read_file": 4096, "patch_file": 4096,
             "git_diff": 4096, "start_job": 8192}
 
 
@@ -566,7 +566,7 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
                                              edits: list[PreparedEdit] | None = None,
                                              cwd: str = ".", check_only: bool = False,
                                              command: Command | None = None, timeout: int | None = None,
-                                             max_bytes: int = 16384, compute_review: dict | None = None,
+                                             max_bytes: int = COMMAND_PREVIEW_BYTES, compute_review: dict | None = None,
                                              read_files: list[str] | None = None,
                                              edit_files: list[str] | None = None,
                                              host: str | None = None,
@@ -580,7 +580,7 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
                 "Include already-known post-edit checks in command={commands:[argv,...]} for one edit/check result (prefer up to 8 checks). Shell text/argv also work. "
                 "read_files/edit_files explicitly return files after edits/checks; edit_files includes fresh guarded IDs. "
                 "For patch text, pass host and absolute cwd to bind and apply in one call. "
-                "check_only cannot run command. Full patch/diff is recorded.")
+                "check_only cannot run command. Check output defaults to a 4 KiB preview. Full records are saved.")
             server.tool(structured_output=False)(structured_apply_patch)
             tool_metadata = server._tool_manager.get_tool("apply_patch")
             model = tool_metadata.fn_metadata.arg_model
@@ -597,7 +597,7 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
         ("workspace_note", note, "Read or update this thread's small local recovery note (goal, constraints, decisions, next_step)."),
         ("resolve_operation", resolve_operation, "Recover the same background job by its idempotency_key after a lost response. This may make a read-only SSH status request to the saved origin, then reconnects local log collection; it never starts a second job."),
         ("workspace_snapshot", workspace_snapshot, "Inspect current remote Git state and measured response bytes. Project contents are not scanned unless scan_content=true; then the scan is bounded by max_files and max_content_bytes. No test history is compared."),
-        ("workspace_switch", switch, "Bind or switch an explicit host and actual cwd without copying code. Optional command/read_files/edit_files combine work; exec_command can also bind directly. Jobs keep their original target."),
+        ("workspace_switch", switch, "Use when binding itself is requested. For the first action, inspect_batch can target directly and exec_command, exec_batch, or apply_patch can bind inline. Jobs keep their original target."),
         ("workspace_use_local", use_local, "Clear this chat's remote binding and use native local tools. Saved targets, records and job origins remain available."),
     ):
         signature = inspect.signature(function, eval_str=True)
@@ -607,13 +607,14 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
 
     for name, function, description in TOOLS:
         if name == 'exec_command':
-            description = (COMMAND_BATCH_GUIDANCE +
-                'Use exec_batch for a ready group with an inline card. Keep operation IDs for optional review_activity. '
+            description = ('Use inspect_batch for supported read-only probes. '
+                'Use exec_batch for other ready groups with an inline card. '
                 'Optional host + absolute cwd binds and runs together; repeat the same target without rebinding. '
                 'read_files/edit_files return selected files after confirmed completion, including nonzero exits; edit_files includes guarded edit_ids. '
-                'Paths use the command cwd; max_bytes applies to command/per file. stdin is exact text. '
+                'Paths use the command cwd; max_bytes defaults to 4 KiB for the command result and each selected file. stdin is exact text. '
                 'Fresh account shell; activate environments per call. '
-                'Ordinary completion uses process-group cleanup without a verified process tree or hard process cap.')
+                'Ordinary completion uses process-group cleanup without a verified process tree or hard process cap. '
+                + COMMAND_BATCH_GUIDANCE)
         signature = inspect.signature(function, eval_str=True)
         public = signature.replace(parameters=[
             p.replace(default=".") if p.name == "cwd" else p.replace(default=_BUDGETS[name])
@@ -623,7 +624,8 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
             public = public.replace(parameters=[*public.parameters.values(),
                 inspect.Parameter('command', inspect.Parameter.POSITIONAL_OR_KEYWORD, default=None, annotation=Command | None),
                 inspect.Parameter('timeout', inspect.Parameter.POSITIONAL_OR_KEYWORD, default=None, annotation=int | None),
-                inspect.Parameter('max_bytes', inspect.Parameter.POSITIONAL_OR_KEYWORD, default=16384, annotation=int),
+                inspect.Parameter('max_bytes', inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                                  default=COMMAND_PREVIEW_BYTES, annotation=int),
                 inspect.Parameter('compute_review', inspect.Parameter.POSITIONAL_OR_KEYWORD, default=None, annotation=dict | None)])
         if name in {'exec_command', 'apply_patch'}:
             public = public.replace(parameters=[*public.parameters.values(),
@@ -638,9 +640,10 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
                 param.replace(annotation=CommandBatch) if param.name == 'command' else param
                 for param in public.parameters.values() if param.name != 'stdin'])
             register('exec_batch', batch_signature,
-                ('Run a ready group of 2–32 sequential argv commands (prefer up to 8) and return one '
+                ('Use inspect_batch for supported read-only probes. Run other ready groups of 2–32 '
+                 'sequential argv commands (prefer up to 8) and return one '
                  'collapsed inline card with the result. Pass host and absolute cwd to bind and run in '
-                 'the same call. Omit host when already bound. Stop on error by default. '
+                 'the same call. Omit host when already bound. Stop on error by default. Output preview defaults to 4 KiB. '
                  'Ordinary completion uses process-group cleanup without a verified process tree or hard process cap.'), execute)
 
     inspect_bound = make_executor(router, 'inspect_batch', ssh_inspect_batch, read_selection)
@@ -662,12 +665,12 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
     inspect_signature = inspect.signature(inspect_commands, eval_str=True)
     inspect_signature = inspect_signature.replace(parameters=list(inspect_signature.parameters.values())[2:])
     register('inspect_batch', inspect_signature,
-        r'Read-only group of 1–8 fixed probes. Pass command={commands:[argv,...]}. '
+        r'Default tool for 1–8 supported read-only probes. Pass command={commands:[argv,...]}. '
         r'Forms: pwd; printf %s\n literal; ls [dir]; stat path; head [-n 1..100] file; wc -l file; '
         'git diff --cached [-- paths]; git diff SHA SHA [-- paths]; git log [-n 1..20]. '
         'For unstaged text: git diff --worktree-raw -- path (1–4 tracked relative paths; compares raw bytes). '
         'Use the existing binding or pass host and absolute cwd for one call without changing it. '
-        'Use paths inside that directory. Git requires the repository root. Returns one collapsed card.',
+        'Use paths inside that directory. Git requires the repository root. Returns one collapsed card and a 4 KiB preview.',
         inspect_commands)
 
     @server.tool(structured_output=False)

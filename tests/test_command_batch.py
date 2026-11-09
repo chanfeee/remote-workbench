@@ -78,7 +78,7 @@ async def test_batch_runs_steps_in_one_transport_with_literal_argv(project, loca
     record = await call(server, 'a', 'audit_get', operation_id=result['output_id'])
     assert record['command_batch'] == command
     assert record['stdin_bytes'] == len(json.dumps(command, ensure_ascii=False).encode())
-    assert 'batch' not in result['remote_task']  # No duplicated step payload.
+    assert 'remote_task' not in result  # Normal completion uses the compact reply.
 
 
 @pytest.mark.parametrize(

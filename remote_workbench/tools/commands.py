@@ -12,7 +12,7 @@ from remote_workbench.tool_runtime import audited_operation, require_connection,
 from remote_workbench.remote_client import edit
 from remote_workbench import job_collector
 from remote_workbench.compute_review import check_compute_review
-from remote_workbench.call_arguments import command_text, validate_call_arguments
+from remote_workbench.call_arguments import COMMAND_PREVIEW_BYTES, command_text, validate_call_arguments
 from remote_workbench.command_spec import Command, CommandBatch, validate_batch
 from remote_workbench.remote_program import program_command
 
@@ -81,7 +81,7 @@ async def ssh_inspect_batch(command: CommandBatch, cwd: str | None = None) -> di
     commands = [normalize_probe(argv) for argv in command['commands']]
     executor = await require_connection()
     payload = dict(command, commands=commands)
-    result = await executor.run('read-only argv batch', cwd=cwd, timeout=10, output_budget=8192,
+    result = await executor.run('read-only argv batch', cwd=cwd, timeout=10, output_budget=COMMAND_PREVIEW_BYTES,
         display_command=command_text(command), batch=True, direct_batch=True,
         input_data=json.dumps(payload, ensure_ascii=False).encode())
     return _command_result(result, batch=True)
