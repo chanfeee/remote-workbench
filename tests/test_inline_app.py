@@ -220,12 +220,17 @@ async def test_inline_patch_binds_applies_checks_and_reads_in_one_request(projec
     assert refused['error'] == 'compute_review_required'
     assert router.registry.get_or_create('new').host is None
     assert (source / 'value.txt').read_text() == 'original\n'
+    submit = source / 'sbatch'
+    submit.write_text('#!/bin/sh\nprintf "%s\\n" fixture-job-id\n')
+    submit.chmod(0o700)
     wire = await wire_call(server, 'new', 'apply_patch', host='a', cwd=str(source),
         patch=patch,
-        command={'commands': [['cat', 'value.txt'], ['pwd']]}, read_files=['value.txt'])
+        command={'commands': [['cat', 'value.txt'], [str(submit), '--parsable', 'compare.sbatch', 'diagnose']]},
+        read_files=['value.txt'])
     value = text_result(wire)
     assert value['success'] and value['command_result']['exit_code'] == 0
     assert 'updated\n' in value['command_result']['stdout']
+    assert 'fixture-job-id\n' in value['command_result']['stdout']
     assert value['files'][0]['content'] == '1\tupdated'
     assert router.registry.get_or_create('new').cwd == str(source)
     assert len(wire.meta['remote-workbench/operation']['steps']) == 2

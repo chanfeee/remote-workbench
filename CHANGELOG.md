@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.24 — ordinary approval for scheduler submissions
+
+- Scheduler submission alone no longer triggers the extra compute confirmation. Direct parallel launchers and runtime wrappers retain their checks.
+
 ## 0.4.23 — show edit diffs and verification by default
 
 - Keep ordinary command batches text-only and make command cards available through `review_activity`.
