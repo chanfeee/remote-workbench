@@ -71,8 +71,8 @@ def _command_result(result, *, batch):
 
 
 @audited_operation
-async def ssh_inspect_batch(command: CommandBatch) -> dict:
-    """Execute fixed, bounded read-only probes on the bound host."""
+async def ssh_inspect_batch(command: CommandBatch, cwd: str | None = None) -> dict:
+    """Execute fixed, bounded read-only probes at the selected remote directory."""
     from remote_workbench.inspect_probes import normalize_probe
 
     validate_batch(command)
@@ -81,7 +81,7 @@ async def ssh_inspect_batch(command: CommandBatch) -> dict:
     commands = [normalize_probe(argv) for argv in command['commands']]
     executor = await require_connection()
     payload = dict(command, commands=commands)
-    result = await executor.run('read-only argv batch', timeout=10, output_budget=8192,
+    result = await executor.run('read-only argv batch', cwd=cwd, timeout=10, output_budget=8192,
         display_command=command_text(command), batch=True, direct_batch=True,
         input_data=json.dumps(payload, ensure_ascii=False).encode())
     return _command_result(result, batch=True)

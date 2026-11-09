@@ -183,7 +183,42 @@ async def test_read_only_batch_rejects_disallowed_input_before_ssh(project, monk
     unbound = await wire_call(server, 'b', 'inspect_batch', command={'commands': [['pwd']]})
     assert unbound.isError and 'no remote workspace' in unbound.content[0].text
     wrong_target = await wire_call(server, 'a', 'inspect_batch', host='b', command={'commands': [['pwd']]})
-    assert wrong_target.isError and 'Unknown argument' in wrong_target.content[0].text
+    assert wrong_target.isError and 'host and absolute cwd' in wrong_target.content[0].text
+
+
+async def test_inspect_explicit_target_needs_one_transport_and_keeps_binding(project, monkeypatch):
+    router, server, source, other = project
+    await call(server, 'a', 'workspace_switch', host='a', cwd=str(source))
+    before = router.registry.get_or_create('a')
+    transport = router.executor('b', '/').run
+    from unittest.mock import AsyncMock
+    counted = AsyncMock(wraps=transport)
+    monkeypatch.setattr(router.executor('b', '/'), 'run', counted)
+    result = text_result(await wire_call(server, 'a', 'inspect_batch', host='b', cwd=str(other),
+                                       command={'commands': [['pwd']]}))
+    assert result['host'] == 'b' and result['cwd'] == str(other)
+    assert result['stdout'].endswith(str(other) + '\n')
+    counted.assert_awaited_once()
+    assert router.registry.get_or_create('a') == before
+
+
+async def test_inline_patch_binds_applies_checks_and_reads_in_one_request(project):
+    router, server, source, _ = project
+    patch = '*** Begin Patch\n*** Update File: value.txt\n@@\n-original\n+updated\n*** End Patch'
+    refused = text_result(await wire_call(server, 'new', 'apply_patch', host='a', cwd=str(source),
+        patch=patch, command={'commands': [['pwd'], ['make', '-j64']]}))
+    assert refused['error'] == 'compute_review_required'
+    assert router.registry.get_or_create('new').host is None
+    assert (source / 'value.txt').read_text() == 'original\n'
+    wire = await wire_call(server, 'new', 'apply_patch', host='a', cwd=str(source),
+        patch=patch,
+        command={'commands': [['cat', 'value.txt'], ['pwd']]}, read_files=['value.txt'])
+    value = text_result(wire)
+    assert value['success'] and value['command_result']['exit_code'] == 0
+    assert 'updated\n' in value['command_result']['stdout']
+    assert value['files'][0]['content'] == '1\tupdated'
+    assert router.registry.get_or_create('new').cwd == str(source)
+    assert len(wire.meta['remote-workbench/operation']['steps']) == 2
 
 
 async def test_read_only_batch_inspects_files_and_git_without_external_drivers(project):
@@ -207,6 +242,7 @@ async def test_read_only_batch_inspects_files_and_git_without_external_drivers(p
     second = git('rev-parse', 'HEAD')
     (source / 'value.txt').write_text('staged\nextra\n')
     git('add', 'value.txt')
+    (source / 'value.txt').write_text('unstaged\nextra\n')
     hook = source / 'driver'
     hook.write_text('#!/bin/sh\ntouch driver-ran\n')
     hook.chmod(0o700)
@@ -217,13 +253,15 @@ async def test_read_only_batch_inspects_files_and_git_without_external_drivers(p
     wire = await wire_call(server, 'a', 'inspect_batch', command={'commands': [
         ['ls'], ['stat', 'value.txt'], ['head', '-n', '1', 'value.txt'],
         ['wc', '-l', 'value.txt'], ['git', 'diff', '--staged', '--', 'value.txt'],
-        ['git', 'diff', first, second], ['git', 'log', '-n', '1'],
+        ['git', 'diff', first, second], ['git', 'diff', '--worktree-raw', '--', './value.txt'],
+        ['git', 'log', '-n', '1'],
     ]})
     value = text_result(wire)
     assert value['exit_code'] == 0, value
-    assert [step['exit_code'] for step in value['steps']] == [0] * 7
-    assert '[command 3/7]\nstaged\n[command 4/7]\n2\tvalue.txt\n' in value['stdout']
+    assert [step['exit_code'] for step in value['steps']] == [0] * 8
+    assert '[command 3/8]\nunstaged\n[command 4/8]\n2\tvalue.txt\n' in value['stdout']
     assert '+staged\n+extra' in value['stdout'] and '+second' in value['stdout']
+    assert '-staged\n+unstaged\n extra' in value['stdout']
     assert value['stdout'].endswith(' second\n')
     assert not (source / 'driver-ran').exists()
     assert wire.meta['remote-workbench/operation']['compact'] is True

@@ -1,5 +1,7 @@
 """Fixed, bounded probes sent to the bound host as stdlib-only Python."""
 from contextlib import contextmanager
+import difflib
+from io import BytesIO
 from itertools import islice
 import json
 import os
@@ -13,6 +15,8 @@ import sys
 OUTPUT_LIMIT = 4096
 FILE_LIMIT = 8 * 1024 * 1024
 ENTRY_LIMIT = 128
+DIFF_FILE_LIMIT = 256 * 1024
+DIFF_LINE_LIMIT = 4096
 
 
 def _checked_path(path):
@@ -49,6 +53,11 @@ def normalize_probe(argv):
             if subcommand == 'diff':
                 end = options.index('--') if '--' in options else len(options)
                 revisions, paths = options[:end], options[end + 1:]
+                if revisions == ['--worktree-raw'] and 1 <= len(paths) <= 4:
+                    checked = [Path(_checked_path(path)).as_posix() for path in paths]
+                    if (len(set(checked)) == len(checked)
+                            and all(path != '.' and not Path(path).is_absolute() for path in checked)):
+                        return ['git', 'diff', '--worktree-raw', '--', *checked]
                 if revisions == ['--staged']:
                     revisions = ['--cached']
                 if ((revisions == ['--cached'] or
@@ -146,26 +155,80 @@ def _inspect_file(program, args):
                     _print_bytes(os.fsencode(f'{lines}\t{path}\n'))
 
 
-def _git_probe(args):
+def _run_git(options, limit):
     env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
     env.update(PATH='/usr/bin:/bin', GIT_OPTIONAL_LOCKS='0', GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull,
                GIT_TERMINAL_PROMPT='0', GIT_NO_LAZY_FETCH='1', GIT_ALLOW_PROTOCOL='')
     prefix = ['/usr/bin/git', '--no-pager', '--literal-pathspecs', '--git-dir=.git', '--work-tree=.',
               '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null']
+    with subprocess.Popen([*prefix, *options], stdin=subprocess.DEVNULL,
+                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env) as process:
+        value = process.stdout.read(limit + 1)
+        if len(value) > limit:
+            process.terminate()
+            return 0, value
+        return process.wait(), value
+
+
+def _git_data(options, limit):
+    code, data = _run_git(options, limit)
+    if code:
+        raise ValueError(data.decode('utf-8', errors='replace').strip()[:512])
+    if len(data) > limit:
+        raise ValueError('Git data exceeds the raw diff limit')
+    return data
+
+
+def _raw_diff(paths):
+    output = bytearray()
+    for path in paths:
+        encoded = os.fsencode(path)
+        entry = _git_data(['ls-files', '--stage', '-z', '--', path], 8192)
+        metadata, separator, tracked = entry.rstrip(b'\0').partition(b'\t')
+        mode, _, revision = metadata.partition(b' ')
+        blob, _, stage = revision.partition(b' ')
+        if (not separator or tracked != encoded or mode not in {b'100644', b'100755'}
+                or stage != b'0' or not re.fullmatch(rb'[a-f0-9]{40}|[a-f0-9]{64}', blob)):
+            raise ValueError('Raw diff requires a tracked regular file with a stage-0 index entry: ' + path)
+        before = _git_data(['cat-file', 'blob', blob.decode('ascii')], DIFF_FILE_LIMIT)
+        deleted = False
+        try:
+            with _parent(path) as (parent, name), _regular_file(parent, name) as source:
+                after = source.read(DIFF_FILE_LIMIT + 1)
+        except FileNotFoundError:
+            after = b''
+            deleted = True
+        if len(after) > DIFF_FILE_LIMIT or b'\0' in before or b'\0' in after:
+            raise ValueError('Raw diff supports text files up to 256 KiB: ' + path)
+        old, new = BytesIO(before).readlines(), BytesIO(after).readlines()
+        if max(len(old), len(new)) > DIFF_LINE_LIMIT:
+            raise ValueError('Raw diff supports up to 4096 lines per file: ' + path)
+        if deleted:
+            output.extend(b'deleted file: ' + encoded + b'\n')
+        target = b'/dev/null' if deleted else b'b/' + encoded
+        for line in difflib.diff_bytes(difflib.unified_diff, old, new, b'a/' + encoded, target):
+            output.extend(line)
+            if not line.endswith(b'\n'):
+                output.extend(b'\n\\ No newline at end of file\n')
+            if len(output) > OUTPUT_LIMIT:
+                _print_bytes(output)
+                return 0
+    _print_bytes(output)
+    return 0
+
+
+def _git_probe(args):
+    if args[:3] == ['diff', '--worktree-raw', '--']:
+        return _raw_diff(args[3:])
     if args[0] == 'diff':
         options = ['diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--ignore-submodules=all',
                    '--no-color', *args[1:]]
     else:
         options = ['log', '--no-show-signature', '--no-decorate', '--no-notes',
                    '--format=%h %s', *args[1:], '--']
-    with subprocess.Popen([*prefix, *options], stdin=subprocess.DEVNULL,
-                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env) as process:
-        value = process.stdout.read(OUTPUT_LIMIT + 1)
-        _print_bytes(value)
-        if len(value) > OUTPUT_LIMIT:
-            process.terminate()
-            return 0
-        return process.wait()
+    code, value = _run_git(options, OUTPUT_LIMIT)
+    _print_bytes(value)
+    return code
 
 
 def main(argv):

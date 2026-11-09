@@ -146,6 +146,23 @@ async def _complete_patch(snapshot, arguments, result, after):
         result['command_skipped'] = 'apply_not_successful'
 
 
+def _command_refusal(tool, options, cwd, host, config):
+    from remote_workbench.call_arguments import command_text
+    from remote_workbench.compute_review import check_compute_review
+
+    command = options['command']
+    refused = authentication_refusal(tool, command, host=host, cwd=cwd)
+    if refused is not None:
+        return refused
+    commands = command['commands'] if isinstance(command, dict) else [command]
+    for item in commands:
+        pending = check_compute_review(command_text(item), cwd, config.ssh_target,
+            options.get('compute_review'), config.compute_review_threshold)
+        if pending:
+            return pending
+    return None
+
+
 def make_executor(router, name, function, read_selection):
     async def execute(state, identity, **arguments):
         after = None
@@ -166,27 +183,21 @@ def make_executor(router, name, function, read_selection):
         validate_call_arguments(name, arguments)
         if name in _LOCAL_TOOLS:
             return await function(**arguments)
-        requested_host = arguments.pop('host', None) if name == 'exec_command' else None
+        requested_host = arguments.pop('host', None) if name in {'exec_command', 'apply_patch'} else None
         if requested_host is not None:
             # An explicit target may be selected in the same operation.
             # New chats without one still fail closed in router.snapshot.
             selected_cwd = arguments.get('cwd')
             if not requested_host or not isinstance(selected_cwd, str) or not selected_cwd.startswith('/'):
                 raise ValueError('An inline host requires an explicit absolute cwd')
+            if name == 'apply_patch' and arguments.get('edits') is not None:
+                raise ValueError('Use the existing binding for guarded edits')
             config = router.config.get_host(requested_host)
-            refused = authentication_refusal('exec_command', arguments.get('command', ''),
-                                             host=requested_host, cwd=selected_cwd)
-            if refused is not None:
-                return refused
-            from remote_workbench.compute_review import check_compute_review
-            from remote_workbench.call_arguments import command_text
-            selected_commands = arguments['command']
-            review_commands = selected_commands['commands'] if isinstance(selected_commands, dict) else [selected_commands]
-            for item in review_commands:
-                pending = check_compute_review(command_text(item), selected_cwd, config.ssh_target,
-                    arguments.get('compute_review'), config.compute_review_threshold)
-                if pending:
-                    return pending
+            reviewed = arguments if name == 'exec_command' else after
+            if reviewed is not None:
+                refused = _command_refusal(name, reviewed, selected_cwd, requested_host, config)
+                if refused is not None:
+                    return refused
             # Repeating an already-canonical target has the same semantics
             # as omitting host. Keep the immutable target and revision;
             # a different path/alias or explicit workspace_switch still
@@ -196,6 +207,8 @@ def make_executor(router, name, function, read_selection):
                     or router.requires_directory_selection(state)):
                 state = await router.switch(state, requested_host, selected_cwd)
             arguments['cwd'] = '.'
+            if after is not None:
+                after['cwd'] = '.'
         target = router.registry.get_job(state.workspace_id, arguments["job_id"]) if name in _JOB_CONTROL_TOOLS else None
         if target is not None and target.host not in router.config.hosts:
             return {"job_id": arguments["job_id"], "error": "job_origin_unavailable",
@@ -203,17 +216,10 @@ def make_executor(router, name, function, read_selection):
                     "state_reason": "origin_host_not_configured"}
         snapshot = router.snapshot(state, target)
         if after is not None:
-            refused = authentication_refusal('apply_patch', after['command'],
-                                             host=snapshot.host, cwd=snapshot.cwd)
+            refused = _command_refusal('apply_patch', after, snapshot.workspace.resolve_cwd(after['cwd']),
+                                       snapshot.host, snapshot.workspace.executor.config)
             if refused is not None:
                 return refused
-            from remote_workbench.compute_review import check_compute_review
-            from remote_workbench.call_arguments import command_text
-            pending = check_compute_review(command_text(after['command']), snapshot.workspace.resolve_cwd(after['cwd']),
-                snapshot.workspace.executor.config.ssh_target, after['compute_review'],
-                snapshot.workspace.executor.config.compute_review_threshold)
-            if pending:
-                return pending
         if name == 'apply_patch':
             from remote_workbench.edit_spec import prepared_edits
             if prepared_edits(arguments.get('edits')):

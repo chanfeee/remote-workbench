@@ -24,7 +24,7 @@ from remote_workbench.session_operations import (
     _job_origin_record, make_executor,
 )
 from remote_workbench.session_context import get_codex_identity, request_metadata, SessionIdentityUnavailable
-from remote_workbench.workspace import TOOLS
+from remote_workbench.workspace import TOOLS, Workspace, bind_tool
 from remote_workbench.workspace_router import SessionRouter, default_state_dir
 from remote_workbench.workspace_snapshot import collect as collect_snapshot
 from remote_workbench import baseline
@@ -569,15 +569,17 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
                                              max_bytes: int = 16384, compute_review: dict | None = None,
                                              read_files: list[str] | None = None,
                                              edit_files: list[str] | None = None,
+                                             host: str | None = None,
                                              ctx: Context = None) -> str:
                 return await handlers["apply_patch"](patch=patch, edits=edits, cwd=cwd, check_only=check_only,
                     command=command, timeout=timeout, max_bytes=max_bytes, compute_review=compute_review,
-                    read_files=read_files, edit_files=edit_files, ctx=ctx)
+                    read_files=read_files, edit_files=edit_files, host=host, ctx=ctx)
             structured_apply_patch.__name__ = "apply_patch"
             structured_apply_patch.__doc__ = (
                 "Apply local-style context patches (Add/Delete supported) or unified diffs. Optional edits use guarded snapshots; pass patch or edits. "
                 "Include already-known post-edit checks in command={commands:[argv,...]} for one edit/check result (prefer up to 8 checks). Shell text/argv also work. "
                 "read_files/edit_files explicitly return files after edits/checks; edit_files includes fresh guarded IDs. "
+                "For patch text, pass host and absolute cwd to bind and apply in one call. "
                 "check_only cannot run command. Full patch/diff is recorded.")
             server.tool(structured_output=False)(structured_apply_patch)
             tool_metadata = server._tool_manager.get_tool("apply_patch")
@@ -615,7 +617,7 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
         public = signature.replace(parameters=[
             p.replace(default=".") if p.name == "cwd" else p.replace(default=_BUDGETS[name])
             if p.name == "max_bytes" and name in _BUDGETS else p
-            for p in signature.parameters.values() if p.name != "host" or name == 'exec_command'])
+            for p in signature.parameters.values() if p.name != "host" or name in {'exec_command', 'apply_patch'}])
         if name == 'apply_patch':
             public = public.replace(parameters=[*public.parameters.values(),
                 inspect.Parameter('command', inspect.Parameter.POSITIONAL_OR_KEYWORD, default=None, annotation=Command | None),
@@ -639,12 +641,32 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
                  'collapsed inline card with the result. Pass host and absolute cwd to bind and run in '
                  'the same call. Omit host when already bound. Stop on error by default.'), execute)
 
-    register('inspect_batch', inspect.signature(ssh_inspect_batch, eval_str=True),
-        r'Read-only group of 1–8 fixed probes on the bound target. Pass command={commands:[argv,...]}. '
+    inspect_bound = make_executor(router, 'inspect_batch', ssh_inspect_batch, read_selection)
+
+    async def inspect_commands(state, identity, command: CommandBatch, host: str | None = None,
+                               cwd: str | None = None):
+        if host is None and cwd is None:
+            return await inspect_bound(state, identity, command=command)
+        if not host or not cwd or not cwd.startswith('/') or '\x00' in cwd:
+            raise ValueError('Supply host and absolute cwd together')
+        workspace = Workspace(state.workspace_id, host, cwd, router.executor(host, '/'))
+        run = bind_tool(workspace, 'inspect_batch', ssh_inspect_batch, '')
+        with audit.scoped_metadata(**dict(audit.current_metadata(), target_id=None, host=host, cwd=cwd)):
+            result = await run(command=command)
+        result['host'] = host
+        result['cwd'] = (result.get('remote_task') or {}).get('actual_cwd') or cwd
+        return result
+
+    inspect_signature = inspect.signature(inspect_commands, eval_str=True)
+    inspect_signature = inspect_signature.replace(parameters=list(inspect_signature.parameters.values())[2:])
+    register('inspect_batch', inspect_signature,
+        r'Read-only group of 1–8 fixed probes. Pass command={commands:[argv,...]}. '
         r'Forms: pwd; printf %s\n literal; ls [dir]; stat path; head [-n 1..100] file; wc -l file; '
         'git diff --cached [-- paths]; git diff SHA SHA [-- paths]; git log [-n 1..20]. '
-        'Use paths inside the bound directory. Git requires a bound repository root. Returns one collapsed card.',
-        make_executor(router, 'inspect_batch', ssh_inspect_batch, read_selection))
+        'For unstaged text: git diff --worktree-raw -- path (1–4 tracked relative paths; compares raw bytes). '
+        'Use the existing binding or pass host and absolute cwd for one call without changing it. '
+        'Use paths inside that directory. Git requires the repository root. Returns one collapsed card.',
+        inspect_commands)
 
     @server.tool(structured_output=False)
     async def workspace_tools(tool: str, arguments: dict | None = None, ctx: Context = None) -> str:

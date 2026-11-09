@@ -104,6 +104,11 @@ def run_batch(spec, status_path, nonce, probe_source=None):
     last exit. A supervisor can read an incomplete run after cancellation.
     """
     commands, stop_on_error = _validate_spec(spec)
+    probe = None
+    if probe_source is not None:
+        namespace = {'__name__': 'remote_workbench_inspect'}
+        exec(probe_source, namespace)
+        probe = namespace['main']
     status = {
         "version": 1,
         "nonce": nonce,
@@ -126,13 +131,13 @@ def run_batch(spec, status_path, nonce, probe_source=None):
 
             started_at = time.monotonic_ns()
             try:
-                if probe_source is not None and argv[0] not in {'/bin/pwd', '/usr/bin/printf'}:
-                    argv = [sys.executable, '-I', '-c', probe_source, *argv]
-                process = subprocess.Popen(
-                    argv,
-                    stdin=subprocess.DEVNULL,
-                    shell=False,
-                )
+                if probe is not None and argv[0] not in {'/bin/pwd', '/usr/bin/printf'}:
+                    raw_exit_code = probe(argv)
+                    sys.stdout.flush()
+                    sys.stderr.flush()
+                else:
+                    process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, shell=False)
+                    raw_exit_code = process.wait()
             except OSError as error:
                 exit_code = 127
                 step["error"] = _bounded_oserror(error)
@@ -145,7 +150,6 @@ def run_batch(spec, status_path, nonce, probe_source=None):
                     break
                 continue
 
-            raw_exit_code = process.wait()
             if raw_exit_code < 0:
                 signal_number = -raw_exit_code
                 exit_code = 128 + signal_number

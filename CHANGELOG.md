@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.19 — fewer calls for remote inspection and edits
+
+- Allow a read-only batch to use one explicit host and absolute directory without changing the chat binding.
+- Bind and apply a raw patch with optional checks and file reads in one approved call.
+- Run fixed probes in the batch worker and support a bounded raw diff for explicitly selected tracked text files.
+
 ## 0.4.18 — bounded file and Git inspections
 
 - Expand `inspect_batch` with fixed forms of `ls`, `stat`, `head`, `wc -l`, staged and commit-to-commit diffs, and short Git logs. The new probes use bounded input and output and keep the read-only approval annotation.
