@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.22 — text-only read-only probes by default
+
+- Return a compact text preview from `inspect_batch`. Saved operations can still be opened as a card on demand.
+- Keep the patch diff visible in its inline card and fold the post-edit command details.
+
 ## 0.4.21 — compact execution defaults
 
 - Prefer read-only probes, inline target selection, and combined patch checks in the session tool guidance.

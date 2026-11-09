@@ -580,7 +580,8 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
                 "Include already-known post-edit checks in command={commands:[argv,...]} for one edit/check result (prefer up to 8 checks). Shell text/argv also work. "
                 "read_files/edit_files explicitly return files after edits/checks; edit_files includes fresh guarded IDs. "
                 "For patch text, pass host and absolute cwd to bind and apply in one call. "
-                "check_only cannot run command. Check output defaults to a 4 KiB preview. Full records are saved.")
+                "check_only cannot run command. The inline card shows the patch diff. "
+                "Check output defaults to a 4 KiB preview. Full records are saved.")
             server.tool(structured_output=False)(structured_apply_patch)
             tool_metadata = server._tool_manager.get_tool("apply_patch")
             model = tool_metadata.fn_metadata.arg_model
@@ -670,7 +671,8 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
         'git diff --cached [-- paths]; git diff SHA SHA [-- paths]; git log [-n 1..20]. '
         'For unstaged text: git diff --worktree-raw -- path (1–4 tracked relative paths; compares raw bytes). '
         'Use the existing binding or pass host and absolute cwd for one call without changing it. '
-        'Use paths inside that directory. Git requires the repository root. Returns one collapsed card and a 4 KiB preview.',
+        'Use paths inside that directory. Git requires the repository root. Returns text with a 4 KiB preview. '
+        'Use review_activity only when a card is requested.',
         inspect_commands)
 
     @server.tool(structured_output=False)

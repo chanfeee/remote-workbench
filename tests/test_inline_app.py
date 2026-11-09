@@ -63,7 +63,9 @@ async def test_patch_text_keeps_original_diff_and_followup_result(project):
     assert text['command_result']['exit_code'] == 0
     diff = text_result(await wire_call(server, 'a', 'read_output', output_id=text['output_id'], stream='diff'))
     assert '-original\n+updated' in diff['content']
-    patch, check = wire.meta['remote-workbench/operation']['steps']
+    card = wire.meta['remote-workbench/operation']
+    assert card['compact'] is True
+    patch, check = card['steps']
     assert patch['tool'] == 'apply_patch' and '-original\n+updated' in patch['streams']['diff']['content']
     assert check['tool'] == 'exec_command' and check['streams']['stdout']['content'] == 'checked'
 
@@ -151,7 +153,7 @@ async def test_ready_batch_binds_runs_and_returns_one_compact_card(project):
     assert step['streams']['stdout']['content'] == result['stdout']
 
 
-async def test_read_only_batch_uses_bound_target_and_returns_one_card(project):
+async def test_read_only_batch_returns_text_and_can_be_reviewed_on_demand(project):
     router, server, source, _ = project
     state = await call(server, 'a', 'workspace_switch', host='a', cwd=str(source))
     # The fixed worker must run even if the interactive shell fails.
@@ -164,7 +166,9 @@ async def test_read_only_batch_uses_bound_target_and_returns_one_card(project):
     assert result['stdout'] == (f'[command 1/3]\n{source}\n[command 2/3]\n{literal}\n'
                                 '[command 3/3]\nplain\n')
     assert not (source / 'forbidden').exists()
-    card = wire.meta['remote-workbench/operation']
+    assert wire.meta is None
+    review = await wire_call(server, 'a', 'review_activity', operation_ids=[result['operation_id']])
+    card = review.meta['remote-workbench/operation']
     assert card['compact'] is True and len(card['steps'][0]['batch_steps']) == 3
     assert router.registry.get_or_create('a').revision == state['revision']
 
@@ -268,7 +272,7 @@ async def test_read_only_batch_inspects_files_and_git_without_external_drivers(p
     assert '-staged\n+unstaged\n extra' in value['stdout']
     assert value['stdout'].endswith(' second\n')
     assert not (source / 'driver-ran').exists()
-    assert wire.meta['remote-workbench/operation']['compact'] is True
+    assert wire.meta is None
 
 
 async def test_read_only_batch_does_not_follow_file_or_directory_symlinks(project):

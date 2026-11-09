@@ -1022,7 +1022,7 @@ wheels = [
 
 [[package]]
 name = "remote-workbench"
-version = "0.4.21"
+version = "0.4.22"
 source = { editable = "." }
 dependencies = [
     { name = "mcp", extra = ["cli"] },

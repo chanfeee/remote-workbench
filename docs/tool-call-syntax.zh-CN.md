@@ -117,7 +117,7 @@ python -m remote_workbench.call_source docs/examples/edit-request.json
 
 不追加日常模型调用、自动修复循环、科研验证计划、在线费用统计或新的功能配置模式。额外 token 是否低于 2% 仍需要后续新的完整任务对照，不能由参数字节变小推算。
 
-只读工具 `inspect_batch` 每批最多 8 项，返回一张折叠卡。可以复用当前绑定，也可以传入明确的 `host` 和绝对 `cwd` 做一次检查。一次性目标必须在主机白名单内，并沿用已有 SSH 主连接。当前聊天绑定不变。Codex 的 `writes` 模式会跳过该工具的审批。
+只读工具 `inspect_batch` 每批最多 8 项，默认返回精简文本。需要卡片时，可用 `operation_id` 调用 `review_activity`。可以复用当前绑定，也可以传入明确的 `host` 和绝对 `cwd` 做一次检查。一次性目标必须在主机白名单内，并沿用已有 SSH 主连接。当前聊天绑定不变。Codex 的 `writes` 模式会跳过该工具的审批。
 
 - `pwd`、`printf %s\n 字面文本`（文本最多 512 字节）。
 - `ls [目录]`、`stat 路径`、`head [-n 1..100] 文件`、`wc -l 文件`。文件读取限定在绑定目录内，不跟随符号链接。`ls` 输出目录条目 JSON，`stat` 输出模式、大小和修改时间，`wc -l` 最多读取 8 MiB。
@@ -125,7 +125,7 @@ python -m remote_workbench.call_source docs/examples/edit-request.json
 
 - `git diff --worktree-raw -- 路径...` 可比较 1–4 个明确指定的已跟踪文本文件。比较暂存区 blob 和工作区原始字节，支持已删除文件，每个文件最多 256 KiB、4096 行。Git 的过滤器、外部 diff 和模式变更由普通 `git diff` 处理，后者仍需审批。
 
-原始补丁可用 `apply_patch(host=..., cwd=..., patch=..., command=..., read_files=...)` 在一次调用里绑定目标、应用补丁、执行检查并回读文件。这个调用仍需审批。使用已有 `edit_id` 的受管快照时，沿用创建它的工作区绑定。
+原始补丁可用 `apply_patch(host=..., cwd=..., patch=..., command=..., read_files=...)` 在一次调用里绑定目标、应用补丁、执行检查并回读文件。这个调用仍需审批。内联卡展示补丁 diff，后续检查的命令和输出默认折叠。使用已有 `edit_id` 的受管快照时，沿用创建它的工作区绑定。
 
 正常完成的命令结果保留输出、退出码、执行状态和用于回读或汇总的 ID。默认进程组清理细节可用 `workspace_tools(tool="audit_get", arguments={"operation_id": output_id})` 查看。命令的实际目录与所选目录不一致时，结果仍会报告实际目录。
 
