@@ -89,7 +89,7 @@
 
 ## 客户端与内容边界
 
-单条命令使用 `exec_command(command=["python3","-m","unittest","-v"])`。Shell 文本支持管道和环境激活。将下面的参数传给 `exec_command` 可一次执行同一目录的多项已确定检查。保留每次返回的 `operation_id`，在一组完成后或最终回复前用 `review_activity(operation_ids=[...])` 汇总成一张可展开的卡片，单条也可汇总。每组建议最多 8 条命令。
+单条命令使用 `exec_command(command=["python3","-m","unittest","-v"])`。Shell 文本支持管道和环境激活。将下面的参数传给 `exec_batch` 可一次执行同一目录的多项已确定检查，并随执行结果返回一张折叠的卡片。首次可以同时传入 `host` 和绝对 `cwd`。对于分开的 `exec_command` 调用，可按需用返回的 `operation_id` 调用 `review_activity(operation_ids=[...])`，单条也可汇总。每组建议最多 8 条命令。
 
 ```json
 {"command":{"commands":[["git","status","--short"],["git","diff","--check"],["python3","-m","unittest","-v"]]},"timeout":30}

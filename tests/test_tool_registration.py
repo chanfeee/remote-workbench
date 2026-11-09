@@ -20,7 +20,7 @@ async def check():
     router = SessionRouter(ServerConfig(), Path(sys.argv[1]))
     session = create_server(router)
     fixed = fixed_server(Workspace('test', 'never-connect.invalid', '/tmp', None))
-    assert len(await session.list_tools()) == 9
+    assert len(await session.list_tools()) == 10
     assert len(await fixed.list_tools()) == 20
     assert not router._executors
     assert 'remote_workbench.server' not in sys.modules

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.12 — batch execution and inline result in one call
+
+- Use `exec_batch` for ready groups, with optional `host` and absolute `cwd` for the initial binding. The result includes one collapsed color card and retains the original model-facing output.
+- Keep ordinary `exec_command` calls text-only and review saved operations on demand.
+
 ## 0.4.11 — compact command activity reviews
 
 - Collect saved command operation IDs and call `review_activity` once for a group. The compact card expands to show command details and output, including when the group contains just one command. The review reads local records. Managed patches retain inline diff cards.

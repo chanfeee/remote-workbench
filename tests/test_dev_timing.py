@@ -274,7 +274,7 @@ async def test_real_development_stdio_correlates_success_and_error_without_reply
         async with ClientSession(reader, writer) as client:
             await client.initialize()
             tools = await client.list_tools()
-            assert len(tools.tools) == 9
+            assert len(tools.tools) == 10
             good = await client.call_tool('workspace_tools', {'tool': 'workspace_info'}, meta={'threadId': 'private-thread'})
             bad = await client.call_tool('workspace_tools', {'tool': 'workspace_info'})
             assert not good.isError and bad.isError

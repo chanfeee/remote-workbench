@@ -605,8 +605,7 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
     for name, function, description in TOOLS:
         if name == 'exec_command':
             description = (COMMAND_BATCH_GUIDANCE +
-                'Keep operation_id values. Call review_activity once after a group of up to 8 commands or before '
-                'the final reply, including a single command. '
+                'Use exec_batch for a ready group with an inline card. Keep operation IDs for optional review_activity. '
                 'Optional host + absolute cwd binds and runs together; repeat the same target without rebinding. '
                 'read_files/edit_files return selected files after confirmed completion, including nonzero exits; edit_files includes guarded edit_ids. '
                 'Paths use the command cwd; max_bytes applies to command/per file. stdin is exact text. '
@@ -635,7 +634,9 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
                 param.replace(annotation=CommandBatch) if param.name == 'command' else param
                 for param in public.parameters.values() if param.name != 'stdin'])
             register('exec_batch', batch_signature,
-                'Compatibility entry for sequential argv batches. Use review_activity to display saved results.', execute)
+                ('Run a ready group of 2–32 sequential argv commands (prefer up to 8) and return one '
+                 'collapsed inline card with the result. Pass host and absolute cwd to bind and run in '
+                 'the same call. Omit host when already bound. Stop on error by default.'), execute)
     @server.tool(structured_output=False)
     async def workspace_tools(tool: str, arguments: dict | None = None, ctx: Context = None) -> str:
         """Advanced tools by name: jobs, recovery, notes, search/edits. tool='describe', arguments={name:'start_job'} returns just that schema; omit name for available names. Normal tasks use exec_command, review_activity or apply_patch directly."""

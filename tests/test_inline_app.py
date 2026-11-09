@@ -101,8 +101,8 @@ async def test_review_activity_groups_separate_commands_and_a_batch_without_ssh(
     commands = [['printf', 'first'], ['false'],
                 {'commands': [['printf', '%s\n', f'step {index}'] for index in range(3, 9)]}]
     operation_ids = []
-    for tool, command in zip(('exec_command', 'exec_command', 'exec_batch'), commands):
-        wire = await wire_call(server, 'a', tool, host='a', cwd=str(source), command=command)
+    for command in commands:
+        wire = await wire_call(server, 'a', 'exec_command', host='a', cwd=str(source), command=command)
         assert wire.meta is None
         operation_ids.append(text_result(wire)['operation_id'])
     executor = router.snapshot(router.registry.get_or_create('a')).workspace.executor
@@ -127,6 +127,24 @@ async def test_review_activity_groups_separate_commands_and_a_batch_without_ssh(
     assert single.meta['openai/widgetSessionId'] != wire.meta['openai/widgetSessionId']
     other = await wire_call(server, 'b', 'review_activity', operation_ids=operation_ids[:1])
     assert other.isError
+
+
+async def test_ready_batch_binds_runs_and_returns_one_compact_card(project):
+    router, server, source, _ = project
+    commands = [['printf', f'check {index}\n'] for index in range(1, 9)]
+    wire = await wire_call(server, 'ready', 'exec_batch', host='a', cwd=str(source),
+                           command={'commands': commands})
+    result = text_result(wire)
+    assert result['exit_code'] == 0
+    assert result['stdout'].endswith('[command 8/8]\ncheck 8\n')
+    state = router.registry.get_or_create('ready')
+    assert (state.host, state.cwd, state.revision) == ('a', str(source), 1)
+    card = wire.meta['remote-workbench/operation']
+    assert card['compact'] is True
+    step, = card['steps']
+    assert step['operation_id'] == result['operation_id']
+    assert len(step['batch_steps']) == 8
+    assert step['streams']['stdout']['content'] == result['stdout']
 
 
 async def test_process_failure_remains_visible_in_text(project):
@@ -211,10 +229,10 @@ async def test_stdio_binds_activity_and_diff_cards_and_keeps_archived_resources(
         async with ClientSession(read, write) as client:
             await client.initialize()
             tools = (await client.list_tools()).tools
-            assert len(tools) == 9
+            assert len(tools) == 10
             for tool in tools:
                 meta = tool.meta or {}
-                expected = inline_app.RESOURCE_URI if tool.name in {'review_activity', 'apply_patch'} else None
+                expected = inline_app.RESOURCE_URI if tool.name in inline_app.CARD_TOOLS else None
                 assert meta.get('ui', {}).get('resourceUri') == expected
                 assert meta.get('openai/outputTemplate') == expected
             batch = (await client.read_resource(inline_app.BATCH_RESOURCE_URI)).contents[0]

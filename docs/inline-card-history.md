@@ -1,5 +1,11 @@
 # Batch cards and historical results
 
+## 0.4.12 batch execution with inline results
+
+`exec_batch` returns the compact card with the original command result. The
+first call can include `host` and an absolute `cwd` to bind and run together.
+`review_activity` remains available for independently saved commands.
+
 ## 0.4.11 compact activity reviews
 
 Following LiteRemote's activity review pattern, `exec_command` returns its

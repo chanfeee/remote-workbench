@@ -17,7 +17,7 @@ RESOURCE_URI = 'ui://remote-workbench/operation-v11.html'
 BATCH_RESOURCE_URI = 'ui://remote-workbench/batch-v1.html'
 HISTORICAL_RESOURCE_URIS = tuple(f'ui://remote-workbench/operation-v{version}.html'
                                  for version in (2, 4, 5, 6, 7, 8, 9, 10))
-CARD_TOOLS = frozenset({'review_activity', 'apply_patch'})
+CARD_TOOLS = frozenset({'exec_batch', 'review_activity', 'apply_patch'})
 PREVIEW_BYTES = 4096
 
 
@@ -76,9 +76,16 @@ def attach_patch_card(blocks, arguments):
     if isinstance(result.get('command_result'), dict):
         steps.append(_step(result['command_result'], 'exec_command', command))
     card_id = steps[0]['operation_id'] or steps[0]['output_id'] or uuid4().hex
+    return _card_result(blocks, steps, card_id)
+
+
+def _card_result(blocks, steps, card_id, *, compact=False):
+    operation = {'steps': steps}
+    if compact:
+        operation['compact'] = True
     return CallToolResult(content=list(blocks), _meta={
         'openai/widgetSessionId': f'remote-workbench:{card_id}',
-        'remote-workbench/operation': {'steps': steps},
+        'remote-workbench/operation': operation,
     })
 
 
@@ -110,7 +117,7 @@ def install(server, router):
     @server.tool(title='远程命令汇总', structured_output=False,
                  annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False))
     async def review_activity(operation_ids: list[str], ctx: Context = None) -> CallToolResult:
-        """Show one compact card for selected exec_command operation_ids in order, including a single command. Use once per group of up to 8 commands or before the final reply. Reads this chat's saved results locally."""
+        """Show one compact card for selected exec_command operation_ids in order, including a single command. Use for a group of separate calls or a single command when a card is needed. Reads this chat's saved results locally."""
         if not 1 <= len(operation_ids) <= 8 or len(set(operation_ids)) != len(operation_ids):
             raise ToolError('Pass 1 to 8 distinct command operation IDs.')
         steps = []
@@ -148,10 +155,8 @@ def install(server, router):
             raise ToolError('Review at most 32 command steps per card. Split large groups.')
         summary = json.dumps({'success': True, 'commands': count, 'operation_ids': operation_ids},
                              separators=(',', ':'))
-        return CallToolResult(content=[TextContent(type='text', text=summary)], _meta={
-            'openai/widgetSessionId': f'remote-workbench:activity:{uuid4().hex}',
-            'remote-workbench/operation': {'steps': steps, 'compact': True},
-        })
+        return _card_result([TextContent(type='text', text=summary)], steps,
+                            f'activity:{uuid4().hex}', compact=True)
 
     for name in CARD_TOOLS:
         server._tool_manager.get_tool(name).meta = {
@@ -162,13 +167,22 @@ def install(server, router):
     @server._mcp_server.call_tool(validate_input=False)
     async def call_with_card(name, arguments):
         blocks = await server.call_tool(name, arguments)
-        if name != 'apply_patch':
+        if name not in {'apply_patch', 'exec_batch'}:
             return blocks
         try:
             identity = get_codex_identity(server.get_context())
             state = router.registry.get_or_create(identity.thread_id)
             with audit.scoped_root(router.audit_dir(state.workspace_id)):
-                return attach_patch_card(blocks, arguments or {})
+                if name == 'apply_patch':
+                    return attach_patch_card(blocks, arguments or {})
+                result = json.loads(blocks[0].text)
+                operation_id = result.get('operation_id')
+                if operation_id and result.get('output_id') and result.get('executed') is not False:
+                    operation = _record(operation_id)
+                    command = (operation.get('arguments') or {}).get('command')
+                    step = _step(result, 'exec_command', command, operation=operation)
+                    return _card_result(blocks, [step], operation_id, compact=True)
+                return blocks
         except (OSError, ValueError, TypeError, KeyError, IndexError, AttributeError):
             # Completed work must stay a valid result even if its preview is unavailable.
             return blocks
