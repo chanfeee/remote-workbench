@@ -3,4 +3,4 @@
 Derived from Onirika; see UPSTREAM.md for provenance and modifications.
 """
 
-__version__ = "0.4.17"
+__version__ = "0.4.18"

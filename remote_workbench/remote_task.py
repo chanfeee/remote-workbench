@@ -367,9 +367,13 @@ def supervise_task(settings):
                 source = Path(__file__).with_name('batch_runner.py').read_text()
             input_path = str(root / 'batch-input.json')
             progress_path = str(root / 'batch-progress.json')
+            direct_batch = settings.get('direct_batch')
+            probe_source = globals().get('INSPECT_PROBE_SOURCE') if direct_batch else None
+            if direct_batch and not probe_source:
+                raise ValueError('Missing read-only probe code')
             source += (f'\nraise SystemExit(run_batch(json.load(open({input_path!r})), '
-                       f'{progress_path!r}, {task_id!r}))\n')
-            if settings.get('direct_batch'):
+                       f'{progress_path!r}, {task_id!r}, probe_source={probe_source!r}))\n')
+            if direct_batch:
                 worker_source = source
             else:
                 command = python_command(source)

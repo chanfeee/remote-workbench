@@ -574,6 +574,8 @@ class SSHExecutor:
         bootstrap = Path(__file__).with_name("remote_shell.py").read_text()
         if batch:
             bootstrap += '\nBATCH_RUNNER_SOURCE = ' + repr(Path(__file__).with_name('batch_runner.py').read_text())
+        if direct_batch:
+            bootstrap += '\nINSPECT_PROBE_SOURCE = ' + repr(Path(__file__).with_name('inspect_probes.py').read_text())
         bootstrap += "\n" + Path(__file__).with_name("remote_task.py").read_text()
         bootstrap += "\n_settings = " + repr(arguments) + "\n"
         if self.remote_state_dir:

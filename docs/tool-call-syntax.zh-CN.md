@@ -117,4 +117,8 @@ python -m remote_workbench.call_source docs/examples/edit-request.json
 
 不追加日常模型调用、自动修复循环、科研验证计划、在线费用统计或新的功能配置模式。额外 token 是否低于 2% 仍需要后续新的完整任务对照，不能由参数字节变小推算。
 
-已绑定的会话可用只读工具 `inspect_batch` 一次运行最多 8 条固定检查并返回一张折叠卡。它只接受 `["pwd"]` 和 `["printf", "%s\n", "字面文本"]`，每段文本最多 512 字节。Codex 的 `writes` 模式会跳过这个工具的审批。工作区绑定和通用命令继续走原有审批。
+已绑定的会话可用只读工具 `inspect_batch`，每批最多 8 项，返回一张折叠卡。Codex 的 `writes` 模式会跳过该工具的审批。
+
+- `pwd`、`printf %s\n 字面文本`（文本最多 512 字节）。
+- `ls [目录]`、`stat 路径`、`head [-n 1..100] 文件`、`wc -l 文件`。文件读取限定在绑定目录内，不跟随符号链接。`ls` 输出目录条目 JSON，`stat` 输出模式、大小和修改时间，`wc -l` 最多读取 8 MiB。
+- 绑定仓库根目录后可用 `git diff --cached [-- 路径...]`（也支持 `--staged`）、`git diff SHA SHA [-- 路径...]` 和 `git log [-n 1..20]`。单项 Git 输出最多 4 KiB，普通工作区 `git diff` 仍通过 `exec_batch` 审批执行。

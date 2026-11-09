@@ -174,14 +174,72 @@ async def test_read_only_batch_rejects_disallowed_input_before_ssh(project, monk
 
     monkeypatch.setattr('remote_workbench.ssh.asyncio.create_subprocess_exec', no_ssh)
     for argv in (['touch', 'x'], ['/tmp/printf', '%s\\n', 'x'],
-                 ['printf', '%b', 'x'], ['pwd', '-L']):
+                 ['printf', '%b', 'x'], ['pwd', '-L'], ['head', '../x'],
+                 ['git', 'diff'], ['git', 'diff', '--cached', '--ext-diff']):
         refused = await wire_call(server, 'a', 'inspect_batch',
             command={'commands': [['pwd'], argv]})
-        assert refused.isError and 'permits only' in refused.content[0].text
+        assert refused.isError and any(message in refused.content[0].text
+                                      for message in ('permits only', 'inside the bound directory'))
     unbound = await wire_call(server, 'b', 'inspect_batch', command={'commands': [['pwd']]})
     assert unbound.isError and 'no remote workspace' in unbound.content[0].text
     wrong_target = await wire_call(server, 'a', 'inspect_batch', host='b', command={'commands': [['pwd']]})
     assert wrong_target.isError and 'Unknown argument' in wrong_target.content[0].text
+
+
+async def test_read_only_batch_inspects_files_and_git_without_external_drivers(project):
+    _, server, source, _ = project
+
+    def git(*args):
+        return subprocess.run(['/usr/bin/git', '-C', str(source), *args],
+                              check=True, capture_output=True, text=True).stdout.strip()
+
+    git('init', '-q')
+    git('config', 'user.email', 'test@example.invalid')
+    git('config', 'user.name', 'Read-only fixture')
+    git('config', 'commit.gpgsign', 'false')
+    (source / '.gitattributes').write_text('value.txt diff=fixture filter=fixture\n')
+    git('add', '.gitattributes', 'value.txt')
+    git('commit', '-qm', 'initial')
+    first = git('rev-parse', 'HEAD')
+    (source / 'value.txt').write_text('second\n')
+    git('add', 'value.txt')
+    git('commit', '-qm', 'second')
+    second = git('rev-parse', 'HEAD')
+    (source / 'value.txt').write_text('staged\nextra\n')
+    git('add', 'value.txt')
+    hook = source / 'driver'
+    hook.write_text('#!/bin/sh\ntouch driver-ran\n')
+    hook.chmod(0o700)
+    for key in ('core.fsmonitor', 'diff.external', 'diff.fixture.textconv', 'filter.fixture.clean'):
+        git('config', key, str(hook))
+    await call(server, 'a', 'workspace_switch', host='a', cwd=str(source))
+
+    wire = await wire_call(server, 'a', 'inspect_batch', command={'commands': [
+        ['ls'], ['stat', 'value.txt'], ['head', '-n', '1', 'value.txt'],
+        ['wc', '-l', 'value.txt'], ['git', 'diff', '--staged', '--', 'value.txt'],
+        ['git', 'diff', first, second], ['git', 'log', '-n', '1'],
+    ]})
+    value = text_result(wire)
+    assert value['exit_code'] == 0, value
+    assert [step['exit_code'] for step in value['steps']] == [0] * 7
+    assert '[command 3/7]\nstaged\n[command 4/7]\n2\tvalue.txt\n' in value['stdout']
+    assert '+staged\n+extra' in value['stdout'] and '+second' in value['stdout']
+    assert value['stdout'].endswith(' second\n')
+    assert not (source / 'driver-ran').exists()
+    assert wire.meta['remote-workbench/operation']['compact'] is True
+
+
+async def test_read_only_batch_does_not_follow_file_or_directory_symlinks(project):
+    _, server, source, other = project
+    (source / 'outside').symlink_to(other, target_is_directory=True)
+    (source / 'link').symlink_to(other / 'value.txt')
+    await call(server, 'a', 'workspace_switch', host='a', cwd=str(source))
+    value = text_result(await wire_call(server, 'a', 'inspect_batch', command={
+        'commands': [['ls', 'outside'], ['head', 'link'], ['wc', '-l', str(other / 'value.txt')]],
+        'stop_on_error': False,
+    }))
+    assert [step['exit_code'] for step in value['steps']] == [1, 1, 1]
+    assert 'other\n' not in value['stdout']
 
 
 async def test_process_failure_remains_visible_in_text(project):

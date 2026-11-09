@@ -72,19 +72,13 @@ def _command_result(result, *, batch):
 
 @audited_operation
 async def ssh_inspect_batch(command: CommandBatch) -> dict:
-    """Execute only fixed directory and literal-output probes on the bound host."""
+    """Execute fixed, bounded read-only probes on the bound host."""
+    from remote_workbench.inspect_probes import normalize_probe
+
     validate_batch(command)
     if len(command['commands']) > 8:
         raise ValueError('inspect_batch accepts at most 8 commands')
-    commands = []
-    for argv in command['commands']:
-        if argv == ['pwd'] or argv == ['/bin/pwd']:
-            commands.append(['/bin/pwd'])
-        elif (len(argv) == 3 and argv[0] in {'printf', '/usr/bin/printf'}
-              and argv[1] in {'%s\\n', '%s\n'} and len(argv[2].encode('utf-8')) <= 512):
-            commands.append(['/usr/bin/printf', argv[1], argv[2]])
-        else:
-            raise ValueError('inspect_batch permits only pwd and fixed-format literal printf')
+    commands = [normalize_probe(argv) for argv in command['commands']]
     executor = await require_connection()
     payload = dict(command, commands=commands)
     result = await executor.run('read-only argv batch', timeout=10, output_budget=8192,

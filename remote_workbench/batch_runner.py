@@ -95,7 +95,7 @@ def _bounded_oserror(error):
     return details[: _MAX_ERROR_CHARS - 3] + "..."
 
 
-def run_batch(spec, status_path, nonce):
+def run_batch(spec, status_path, nonce, probe_source=None):
     """Run validated argv commands in order and return the batch exit code.
 
     Child processes inherit this process's stdout, stderr, and process group.
@@ -126,6 +126,8 @@ def run_batch(spec, status_path, nonce):
 
             started_at = time.monotonic_ns()
             try:
+                if probe_source is not None and argv[0] not in {'/bin/pwd', '/usr/bin/printf'}:
+                    argv = [sys.executable, '-I', '-c', probe_source, *argv]
                 process = subprocess.Popen(
                     argv,
                     stdin=subprocess.DEVNULL,

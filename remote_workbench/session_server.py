@@ -641,8 +641,9 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
 
     register('inspect_batch', inspect.signature(ssh_inspect_batch, eval_str=True),
         r'Read-only group of 1–8 fixed probes on the bound target. Pass command={commands:[argv,...]}. '
-        r'Only pwd and printf with format %s\n and one literal value (up to 512 bytes) are accepted. '
-        'Returns one collapsed card. The tool uses the existing SSH connection and requires a bound target.',
+        r'Forms: pwd; printf %s\n literal; ls [dir]; stat path; head [-n 1..100] file; wc -l file; '
+        'git diff --cached [-- paths]; git diff SHA SHA [-- paths]; git log [-n 1..20]. '
+        'Use paths inside the bound directory. Git requires a bound repository root. Returns one collapsed card.',
         make_executor(router, 'inspect_batch', ssh_inspect_batch, read_selection))
 
     @server.tool(structured_output=False)

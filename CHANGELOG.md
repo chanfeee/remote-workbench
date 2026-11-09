@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.18 — bounded file and Git inspections
+
+- Expand `inspect_batch` with fixed forms of `ls`, `stat`, `head`, `wc -l`, staged and commit-to-commit diffs, and short Git logs. The new probes use bounded input and output and keep the read-only approval annotation.
+
 ## 0.4.17 — read-only command probes
 
 - Add `inspect_batch` for up to eight fixed `pwd` and literal `printf` probes on an existing binding. It returns one collapsed card and can skip approval in Codex writes mode.
