@@ -11,6 +11,7 @@ import hashlib
 import shutil
 import json
 from pathlib import Path
+from uuid import uuid4
 from remote_workbench import audit
 from dataclasses import dataclass
 
@@ -383,6 +384,48 @@ class SSHExecutor:
         if self.config.port != 22:
             args.extend(["-p", str(self.config.port)])
         return [*args, self.config.ssh_target, command]
+
+    async def probe_directory(self, cwd: str) -> dict:
+        """Read the canonical directory and account home over the existing master."""
+        from remote_workbench.remote_shell import python_command
+
+        if not self.config.execution_enabled:
+            raise ValueError("Remote execution is disabled; this host has been paused")
+        marker = f"\nREMOTE_WORKBENCH_DIRECTORY_{uuid4().hex}:".encode()
+        source = (
+            "import json,os\n"
+            f"os.chdir(os.path.realpath({cwd!r}))\n"
+            "detail = {'cwd': os.getcwd(), 'home': os.path.expanduser('~')}\n"
+            f"os.write(1, {marker!r} + json.dumps(detail).encode() + b'\\n')\n"
+        )
+        process = await asyncio.create_subprocess_exec(*self._ssh_args("exec " + python_command(source)),
+            stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT)
+        async def read_probe():
+            try:
+                await process.stdout.readexactly(16385)
+            except asyncio.IncompleteReadError as exc:
+                return await process.wait(), exc.partial
+            raise ValueError("Remote directory validation produced too much output")
+
+        try:
+            code, output = await asyncio.wait_for(read_probe(), self.config.command_timeout)
+        except asyncio.TimeoutError as exc:
+            raise ValueError("Remote directory validation timed out") from exc
+        finally:
+            if process.returncode is None:
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass
+                await process.communicate()
+        if code:
+            raise ValueError("Remote directory validation failed: " +
+                             output[-2048:].decode(errors="replace").strip())
+        _, found, detail = output.rpartition(marker)
+        if not found:
+            raise ValueError("Invalid remote directory validation result")
+        return json.loads(detail.partition(b"\n")[0])
 
     async def cancel_task(self, task_id: str, *, kind: str = "jobs",
                           origin: dict | None = None) -> dict:

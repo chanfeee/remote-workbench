@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.13 — faster directory binding and command batches
+
+- Validate the remote directory over the existing SSH master with a bounded metadata probe.
+- Save one durable progress snapshot before each batch step and one at completion.
+
 ## 0.4.12 — batch execution and inline result in one call
 
 - Use `exec_batch` for ready groups, with optional `host` and absolute `cwd` for the initial binding. The result includes one collapsed color card and retains the original model-facing output.

@@ -93,9 +93,9 @@ def run_batch(spec, status_path, nonce):
     """Run validated argv commands in order and return the batch exit code.
 
     Child processes inherit this process's stdout, stderr, and process group.
-    Their stdin is closed.  Progress is replaced atomically before a spawn and
-    after each completed step so a supervising process can inspect an
-    incomplete run after cancellation or timeout.
+    Their stdin is closed. Before each spawn, one durable snapshot records the
+    preceding exit and the next running step. The final snapshot records the
+    last exit. A supervisor can read an incomplete run after cancellation.
     """
     commands, stop_on_error = _validate_spec(spec)
     status = {
@@ -104,8 +104,6 @@ def run_batch(spec, status_path, nonce):
         "complete": False,
         "steps": [_new_step(index) for index in range(len(commands))],
     }
-    _write_status(status_path, status)
-
     first_nonzero = 0
     for index, argv in enumerate(commands):
         step = status["steps"][index]
@@ -128,7 +126,6 @@ def run_batch(spec, status_path, nonce):
             step["state"] = "finished"
             step["exit_code"] = exit_code
             step["elapsed_ms"] = _elapsed_ms(started_at)
-            _write_status(status_path, status)
             if first_nonzero == 0:
                 first_nonzero = exit_code
             if stop_on_error:
@@ -145,8 +142,6 @@ def run_batch(spec, status_path, nonce):
         step["state"] = "finished"
         step["exit_code"] = exit_code
         step["elapsed_ms"] = _elapsed_ms(started_at)
-        _write_status(status_path, status)
-
         if exit_code != 0:
             if first_nonzero == 0:
                 first_nonzero = exit_code
