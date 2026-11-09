@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.14 — report SSH multiplexing failures
+
+- Explain file descriptor transfer failures and invalidate cached connection health during directory validation.
+
 ## 0.4.13 — faster directory binding and command batches
 
 - Validate the remote directory over the existing SSH master with a bounded metadata probe.

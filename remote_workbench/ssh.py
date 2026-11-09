@@ -19,6 +19,10 @@ from remote_workbench.config import HostConfig
 
 # How long a successful connection check remains valid (seconds).
 _CHECK_CACHE_TTL = 5.0
+_MUX_FD_FAILURE = "mux_client_request_session: send fds failed"
+_MUX_FD_GUIDANCE = ("The local SSH client could not pass file descriptors to the existing "
+                    "ControlMaster. Stop remote operations and have the user verify the "
+                    "connection in their terminal before resuming.")
 
 
 @dataclass
@@ -373,6 +377,10 @@ class SSHExecutor:
             message = (f"Timed out after {timeout}s; " +
                        (f"cleanup: {remote_task.get('cleanup_state', 'unconfirmed')}. " if acknowledged else "remote state unknown. "))
             contents["stderr"], _ = audit.preview((message + contents["stderr"]).encode(), err_budget)
+        if transport_failed and _MUX_FD_FAILURE in contents["stderr"]:
+            contents["stderr"], clipped = audit.preview(
+                (_MUX_FD_GUIDANCE + "\n" + contents["stderr"]).encode(), err_budget)
+            truncated |= clipped
         return SSHResult(contents["stdout"], contents["stderr"], exit_code, timed_out,
                          record_id, truncated, state, remote_task)
 
@@ -420,8 +428,12 @@ class SSHExecutor:
                     pass
                 await process.communicate()
         if code:
-            raise ValueError("Remote directory validation failed: " +
-                             output[-2048:].decode(errors="replace").strip())
+            diagnostic = output[-2048:].decode(errors="replace").strip()
+            if code == 255 and _is_ssh_error(diagnostic):
+                self.invalidate_cache()
+            if code == 255 and _MUX_FD_FAILURE in diagnostic:
+                diagnostic = _MUX_FD_GUIDANCE + "\n" + diagnostic
+            raise ValueError("Remote directory validation failed: " + diagnostic)
         _, found, detail = output.rpartition(marker)
         if not found:
             raise ValueError("Invalid remote directory validation result")
