@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>批量命令</title>
+<style>
+  :root { color-scheme: light dark; font: 14px/1.45 system-ui, sans-serif; }
+  body { margin: 0; padding: 10px 12px; overflow: hidden; }
+  #status { margin-inline-start: .5em; opacity: .8; }
+  details { margin-block-start: 6px; }
+  summary { cursor: pointer; }
+  pre { max-block-size: 16rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+<strong id="title">批量命令</strong><span id="status"></span>
+<details id="details" hidden><summary>查看输出和退出码</summary><pre id="output"></pre></details>
+<script>
+(() => {
+  const title = document.getElementById('title');
+  const status = document.getElementById('status');
+  const details = document.getElementById('details');
+  const output = document.getElementById('output');
+  const initializeId = 'remote-workbench-batch';
+  let visible = typeof IntersectionObserver !== 'function';
+  let pending;
+  let view;
+  let height = 0;
+  let frame;
+
+  const notify = (method, params = {}) => window.parent.postMessage({jsonrpc: '2.0', method, params}, '*');
+  function resize() {
+    if (!visible || frame !== undefined) return;
+    frame = requestAnimationFrame(() => {
+      frame = undefined;
+      const next = Math.ceil(document.body.getBoundingClientRect().height);
+      if (next === height) return;
+      height = next;
+      notify('ui/notifications/size-changed', {height});
+    });
+  }
+
+  const observer = visible ? null : new IntersectionObserver(([entry]) => {
+    visible = entry.isIntersecting;
+    render();
+  });
+
+  function render() {
+    if (!visible || !pending || view) return;
+    let result;
+    try { result = JSON.parse(pending.text); } catch { /* Plain text MCP error. */ }
+    const steps = Array.isArray(result?.steps) ? result.steps : [];
+    view = {steps, result, fallback: steps.length ? '' : pending.text};
+    title.textContent = steps.length ? `批量命令 · ${steps.length} 条` : '批量命令';
+    if (pending.isError) status.textContent = '调用失败';
+    else if (result?.executed === false) status.textContent = '未执行';
+    else if (result?.timed_out) status.textContent = '已超时';
+    else if (result?.execution_state !== 'finished' || result?.batch_state !== 'finished') status.textContent = '状态待确认';
+    else status.textContent = result.exit_code === 0 ? '完成' : `退出码 ${result.exit_code}`;
+    details.hidden = false;
+    pending = undefined;
+    observer?.disconnect();
+    resize();
+  }
+
+  function receive(envelope) {
+    if (view) return;
+    for (const value of [envelope, envelope?.call_tool_result, envelope?.mcp_tool_result]) {
+      if (!Array.isArray(value?.content)) continue;
+      const block = value.content.find(item => item?.type === 'text' && typeof item.text === 'string');
+      if (block) {
+        pending = {text: block.text, isError: value.isError === true};
+        render();
+        return;
+      }
+    }
+  }
+
+  details.addEventListener('toggle', () => {
+    if (!view || !details.open) output.textContent = '';
+    else {
+      const {steps, result, fallback} = view;
+      const exits = steps.map((step, index) =>
+        `${index + 1}. ${step.state}${Number.isInteger(step.exit_code) ? ` · exit ${step.exit_code}` : ''}`);
+      output.textContent = [exits.join('\n'), result?.stdout, result?.stderr, fallback,
+        result?.truncated ? '预览已截断，可通过 read_output 查看完整输出。' : ''].filter(Boolean).join('\n\n');
+    }
+    resize();
+  });
+  let width = window.innerWidth;
+  window.addEventListener('resize', () => {
+    if (window.innerWidth === width) return;
+    width = window.innerWidth;
+    resize();
+  });
+  window.addEventListener('message', event => {
+    if (event.source !== window.parent || event.data?.jsonrpc !== '2.0') return;
+    if (event.data.id === initializeId && event.data.result) notify('ui/notifications/initialized');
+    if (event.data.method === 'ui/notifications/tool-result') receive(event.data.params);
+  });
+  window.addEventListener('openai:set_globals', event => receive(event.detail?.globals?.toolResponseMetadata));
+  window.parent.postMessage({jsonrpc: '2.0', id: initializeId, method: 'ui/initialize', params: {
+    appInfo: {name: 'Remote Workbench Batch', version: '1.0.0'},
+    appCapabilities: {}, protocolVersion: '2026-01-26',
+  }}, '*');
+  observer?.observe(document.body);
+  receive(window.openai?.toolResponseMetadata);
+})();
+</script>
+</body>
+</html>

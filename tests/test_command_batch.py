@@ -78,7 +78,7 @@ async def test_batch_runs_steps_in_one_transport_with_literal_argv(project, loca
     record = await call(server, 'a', 'audit_get', operation_id=result['output_id'])
     assert record['command_batch'] == command
     assert record['stdin_bytes'] == len(json.dumps(command, ensure_ascii=False).encode())
-    assert 'batch' not in result['remote_task']  # No duplicated step payload.
+    assert 'remote_task' not in result  # Normal completion uses the compact reply.
 
 
 @pytest.mark.parametrize(
@@ -186,6 +186,22 @@ async def test_batch_cancellation_cleans_active_step_and_retains_unknown_progres
     task = next(r for r in records if r.get('kind') == 'command')['remote_task']
     assert task['batch_state'] == 'unknown'
     assert [r['state'] for r in task['batch']] == ['unknown', 'not_run']
+
+
+def test_batch_progress_recovers_last_complete_checkpoint_before_torn_tail(tmp_path):
+    rows = [
+        dict(index=0, state='finished', exit_code=0, elapsed_ms=5),
+        dict(index=1, state='running', exit_code=None, elapsed_ms=0),
+        dict(index=2, state='not_started', exit_code=None, elapsed_ms=0),
+    ]
+    checkpoint = dict(version=1, nonce='correct', complete=False, steps=rows)
+    journal = tmp_path / 'batch-progress.jsonl'
+    journal.write_text(json.dumps(checkpoint) + '\n{"version":1')
+
+    progress = remote_task.batch_progress(tmp_path, 'correct', 3)
+    assert progress['batch_state'] == 'unknown'
+    assert [step['state'] for step in progress['batch']] == ['finished', 'unknown', 'not_run']
+    assert progress['batch'][0]['exit_code'] == 0
 
 
 @pytest.mark.parametrize('damage', ['identity', 'count', 'complete', 'not_object', 'bad_row'])

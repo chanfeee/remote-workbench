@@ -6,7 +6,7 @@ from remote_workbench.tools import commands
 
 @pytest.mark.parametrize("command", [
     "make -j32", "make -j", "ninja", "cmake --build build --parallel 16", "ctest -j8",
-    "pytest -n auto", "mpirun -np 16 ./fit", "srun ./fit", "sbatch script.sh",
+    "pytest -n auto", "mpirun -np 16 ./fit", "srun ./fit",
     "find . -type f | xargs -P 32 worker", "LD_PRELOAD=hook.so ./probe",
     "python3 -c 'from concurrent.futures import ProcessPoolExecutor; ProcessPoolExecutor(max_workers=32)'",
     "cd source\nmake -j64", "python3 -m pytest -n16",
@@ -18,9 +18,14 @@ def test_parallel_and_wrapper_workloads_require_review(command):
 @pytest.mark.parametrize("command", [
     "pwd", "git diff --stat", "pytest -q tests/test_parser.py", "make -j2",
     "echo 'make -j32'", "printf '%s' mpirun", "rg LD_PRELOAD .", "mpirun --help", "make -n", "ninja -n",
+    "sbatch --parsable compare.sbatch diagnose", "qsub script.sh", "bsub ./fit", "condor_submit task.sub",
 ])
 def test_ordinary_work_is_direct(command):
     assert compute_risks(command) == []
+
+
+def test_scheduler_submission_does_not_exempt_direct_work_in_the_same_shell_command():
+    assert compute_risks('sbatch job.sh && srun ./fit') == ['srun launches a compute workload']
 
 
 @pytest.mark.parametrize('flag', ['--help', '--version', '-h'])

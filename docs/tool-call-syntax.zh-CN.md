@@ -89,7 +89,7 @@
 
 ## 客户端与内容边界
 
-命令优先使用 `exec_command(command=["python3","-m","unittest","-v"])`；确需 shell 管道或环境激活时才使用 shell 文本。同一目录的多项检查可用一次受监督的顺序批量执行：
+单条命令使用 `exec_command(command=["python3","-m","unittest","-v"])`。Shell 文本支持管道和环境激活。将下面的参数传给 `exec_batch` 可一次执行同一目录的多项已确定检查，并返回精简文本。首次可以同时传入 `host` 和绝对 `cwd`。需要查看命令卡片时，可用返回的 `operation_id` 调用 `review_activity(operation_ids=[...])`，单条也可汇总。每组建议最多 8 条命令。
 
 ```json
 {"command":{"commands":[["git","status","--short"],["git","diff","--check"],["python3","-m","unittest","-v"]]},"timeout":30}
@@ -116,3 +116,17 @@ python -m remote_workbench.call_source docs/examples/edit-request.json
 定向回归覆盖旧空行上下文错误、实际 Node 参数边界、快照范围和缓存文件、字节精确性、权限、外部冲突、批量预检查、跨聊天／目标拒绝、MCP 重启及旧入口兼容。自动化测试覆盖以对应验证说明为准；个人服务器验收过程和原始记录不进入仓库。
 
 不追加日常模型调用、自动修复循环、科研验证计划、在线费用统计或新的功能配置模式。额外 token 是否低于 2% 仍需要后续新的完整任务对照，不能由参数字节变小推算。
+
+只读工具 `inspect_batch` 每批最多 8 项，默认返回精简文本。需要卡片时，可用 `operation_id` 调用 `review_activity`。可以复用当前绑定，也可以传入明确的 `host` 和绝对 `cwd` 做一次检查。一次性目标必须在主机白名单内，并沿用已有 SSH 主连接。当前聊天绑定不变。Codex 的 `writes` 模式会跳过该工具的审批。
+
+- `pwd`、`printf %s\n 字面文本`（文本最多 512 字节）。
+- `ls [目录]`、`stat 路径`、`head [-n 1..100] 文件`、`wc -l 文件`。文件读取限定在绑定目录内，不跟随符号链接。`ls` 输出目录条目 JSON，`stat` 输出模式、大小和修改时间，`wc -l` 最多读取 8 MiB。
+- 绑定仓库根目录后可用 `git diff --cached [-- 路径...]`（也支持 `--staged`）、`git diff SHA SHA [-- 路径...]` 和 `git log [-n 1..20]`。单项 Git 输出最多 4 KiB。
+
+- `git diff --worktree-raw -- 路径...` 可比较 1–4 个明确指定的已跟踪文本文件。比较暂存区 blob 和工作区原始字节，支持已删除文件，每个文件最多 256 KiB、4096 行。Git 的过滤器、外部 diff 和模式变更由普通 `git diff` 处理，后者仍需审批。
+
+原始补丁可用 `apply_patch(host=..., cwd=..., patch=..., command=..., read_files=...)` 在一次调用里绑定目标、应用补丁、执行检查并回读文件。这个调用仍需审批。内联卡展示补丁 diff 和验证结果，命令和输出默认折叠。失败、状态未知或需要确认的情况单独显示。使用已有 `edit_id` 的受管快照时，沿用创建它的工作区绑定。
+
+正常完成的命令结果保留输出、退出码、执行状态和用于回读或汇总的 ID。默认进程组清理细节可用 `workspace_tools(tool="audit_get", arguments={"operation_id": output_id})` 查看。命令的实际目录与所选目录不一致时，结果仍会报告实际目录。
+
+默认优先走支持的 `inspect_batch` 只读路径。首次使用已明确的远端目标时，在操作调用里一起给出 `host` 和绝对 `cwd`。通用命令、只读探测和补丁后检查默认预览最多 4 KiB。通用命令和补丁后检查可用 `max_bytes` 调高预览额度，或按需用 `read_output` 回读完整记录。

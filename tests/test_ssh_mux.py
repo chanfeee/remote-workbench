@@ -2,6 +2,7 @@ import asyncio
 from pathlib import Path
 import shutil
 import socket
+import sys
 import tempfile
 from unittest.mock import AsyncMock, MagicMock
 
@@ -9,6 +10,33 @@ import pytest
 
 from remote_workbench.config import HostConfig
 from remote_workbench.ssh import SSHExecutor
+
+
+@pytest.mark.parametrize("probe", [False, True])
+async def test_mux_fd_failure_returns_stop_guidance_without_retry(tmp_path, monkeypatch, probe):
+    monkeypatch.setenv("REMOTE_WORKBENCH_AUDIT_DIR", str(tmp_path / "audit"))
+    create = asyncio.create_subprocess_exec
+    launches = []
+
+    async def failed_transport(*args, **kwargs):
+        launches.append(args)
+        code = "import sys; sys.stderr.write('mux_client_request_session: send fds failed\\n'); sys.exit(255)"
+        return await create(sys.executable, "-c", code, **kwargs)
+
+    monkeypatch.setattr("remote_workbench.ssh.asyncio.create_subprocess_exec", failed_transport)
+    executor = SSHExecutor(HostConfig(ssh_host="never-connect.invalid"))
+    executor._last_check_ok = True
+    if probe:
+        with pytest.raises(ValueError, match="Stop remote operations") as error:
+            await executor.probe_directory("/tmp")
+        diagnostic = str(error.value)
+    else:
+        result = await executor.run("echo must-not-run", cwd="/tmp")
+        assert result.exit_code == 255 and result.execution_state == "remote_state_unknown"
+        diagnostic = result.stderr
+    assert "Stop remote operations" in diagnostic
+    assert "mux_client_request_session: send fds failed" in diagnostic
+    assert len(launches) == 1 and not executor._last_check_ok
 
 
 @pytest.fixture

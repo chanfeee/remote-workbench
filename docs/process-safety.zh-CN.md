@@ -4,9 +4,9 @@
 
 ## 大量计算先确认
 
-启动高并发编译、MPI、多进程计算、批量作业提交，或者测试运行时进程包装器前，Agent 应先展示完整命令、服务器与目录、预计并发规模、所用环境和可能的风险，等待用户明确确认。泛泛的“继续测试”不能替代对具体计算方案的确认。
+直接启动高并发编译、MPI、多进程计算或测试运行时进程包装器前，Agent 应先展示完整命令、服务器与目录、预计并发规模、所用环境和可能的风险，等待用户明确确认。泛泛的“继续测试”不能替代对具体计算方案的确认。
 
-工具会对部分常见命令返回 `compute_review_required`，此次不会执行。例如 `make -j32`、自动并行的 `ninja`、MPI 启动器和调度器提交命令。默认并行审核阈值为 8，可通过 `compute_review_threshold` 调整；它不是资源硬上限。通过用户确认后，Agent 将以下信息随 `exec_command` / `start_job` 的 `compute_review` 参数提交，完整命令仍由原来的 `command` 参数传入：
+工具会对部分常见命令返回 `compute_review_required`，此次不会执行。例如 `make -j32`、自动并行的 `ninja`、MPI 启动器和直接启动任务的 `srun`。提交命令 `sbatch`、`qsub`、`bsub` 和 `condor_submit` 走正常工具审批。默认并行审核阈值为 8，可通过 `compute_review_threshold` 调整；它不是资源硬上限。通过用户确认后，Agent 将以下信息随 `exec_command` / `start_job` 的 `compute_review` 参数提交，完整命令仍由原来的 `command` 参数传入：
 
 ```json
 {

@@ -36,7 +36,7 @@ def normalize_arguments(name, arguments):
     arguments = dict(arguments or {})
     if name == 'workspace_tools' and isinstance(arguments.get('arguments'), dict):
         arguments['arguments'] = normalize_arguments(arguments.get('tool'), arguments['arguments'])
-    if name in {'exec_command', 'ssh_run', 'workspace_switch', 'apply_patch'}:
+    if name in {'exec_command', 'exec_batch', 'inspect_batch', 'ssh_run', 'workspace_switch', 'apply_patch'}:
         for alias, canonical in [('argv', 'command'), ('cmd', 'command'), ('workdir', 'cwd')]:
             if alias not in arguments:
                 continue
@@ -49,4 +49,6 @@ def normalize_arguments(name, arguments):
         if isinstance(arguments.get('command'), dict):
             # Reject invalid data before Pydantic can coerce booleans/arrays.
             validate_batch(arguments['command'])
+            if name == 'exec_batch' and len(arguments['command']['commands']) < 2:
+                raise ValueError('exec_batch requires at least 2 commands. Use exec_command for one.')
     return arguments

@@ -1,5 +1,93 @@
 # Changelog
 
+## 0.4.24 — ordinary approval for scheduler submissions
+
+- Scheduler submission alone no longer triggers the extra compute confirmation. Direct parallel launchers and runtime wrappers retain their checks.
+
+## 0.4.23 — show edit diffs and verification by default
+
+- Keep ordinary command batches text-only and make command cards available through `review_activity`.
+- Show verification counts next to patch diffs. Surface failures, incomplete execution, and decisions above the folded command output.
+
+## 0.4.22 — text-only read-only probes by default
+
+- Return a compact text preview from `inspect_batch`. Saved operations can still be opened as a card on demand.
+- Keep the patch diff visible in its inline card and fold the post-edit command details.
+
+## 0.4.21 — compact execution defaults
+
+- Prefer read-only probes, inline target selection, and combined patch checks in the session tool guidance.
+- Limit default command output previews to 4 KiB. Full output remains available through the audit spool.
+
+## 0.4.20 — compact successful command replies
+
+- Omit the usual process-group cleanup metadata and redundant cwd from successful command replies. Keep the original audit record, output IDs, and failure diagnostics.
+
+## 0.4.19 — fewer calls for remote inspection and edits
+
+- Allow a read-only batch to use one explicit host and absolute directory without changing the chat binding.
+- Bind and apply a raw patch with optional checks and file reads in one approved call.
+- Run fixed probes in the batch worker and support a bounded raw diff for explicitly selected tracked text files.
+
+## 0.4.18 — bounded file and Git inspections
+
+- Expand `inspect_batch` with fixed forms of `ls`, `stat`, `head`, `wc -l`, staged and commit-to-commit diffs, and short Git logs. The new probes use bounded input and output and keep the read-only approval annotation.
+
+## 0.4.17 — read-only command probes
+
+- Add `inspect_batch` for up to eight fixed `pwd` and literal `printf` probes on an existing binding. It returns one collapsed card and can skip approval in Codex writes mode.
+
+## 0.4.16 — lower batch checkpoint latency
+
+- Sync each pre-dispatch checkpoint to a single private journal. Keep the atomic final snapshot and recover the last complete checkpoint if a batch is interrupted.
+
+## 0.4.15 — faster text reads in bound chats
+
+- Run single and selected text reads through a dedicated worker that skips the interactive login shell while retaining supervision, output limits, and edit snapshot checks.
+
+## 0.4.14 — report SSH multiplexing failures
+
+- Explain file descriptor transfer failures and invalidate cached connection health during directory validation.
+
+## 0.4.13 — faster directory binding and command batches
+
+- Validate the remote directory over the existing SSH master with a bounded metadata probe.
+- Save one durable progress snapshot before each batch step and one at completion.
+
+## 0.4.12 — batch execution and inline result in one call
+
+- Use `exec_batch` for ready groups, with optional `host` and absolute `cwd` for the initial binding. The result includes one collapsed color card and retains the original model-facing output.
+- Keep ordinary `exec_command` calls text-only and review saved operations on demand.
+
+## 0.4.11 — compact command activity reviews
+
+- Collect saved command operation IDs and call `review_activity` once for a group. The compact card expands to show command details and output, including when the group contains just one command. The review reads local records. Managed patches retain inline diff cards.
+
+## 0.4.10 — cards for command groups and diffs
+
+- Use `exec_batch` for one structured inline card with two or more commands. A single `exec_command` uses the client's normal tool record. Managed patches have an inline diff card.
+
+## 0.4.9 — structured inline cards
+
+- Restore the command and diff views. A batch shares one card with numbered commands, individual outcomes, and one expandable output section. Saved cards remain readable, including those from 0.4.8.
+
+## 0.4.8 — visible batch cards
+
+- Add `exec_batch` to display one lightweight inline text card per command group. The card reads the existing MCP result and draws output when expanded. Each batch has its own history entry.
+
+## 0.4.7 — batches of up to eight commands
+
+- Prefer groups of up to eight commands or post-edit checks that can be prepared together. Send smaller ready groups immediately. Each batch returns one native tool result.
+
+## 0.4.6 — native text results
+
+- Stop binding HTML templates to commands and managed edits. New operations return ordinary MCP text, without creating custom widgets, generating preview copies or reading audit files for UI decoration. Full output/diff records and the eight-tool interface remain available.
+- Tell callers to prefer one batch for already-known commands in the same directory, and to include known post-edit checks in `apply_patch.command`. A batch retains every step's output and exit code in one native result; independent requests are not merged after submission.
+- Keep old card resources readable on demand, with forced inline display disabled. Existing records and saved card data are not deleted or replayed. Installed-version checks now verify native text by default and historical resources separately.
+- For historical views only, pause offscreen/hidden card drawing and layout observation, retain only the latest pending snapshot, and batch visible updates and height reports per animation frame. Keep the initialization handshake eager for hosts that hide views until connected.
+- Build command output and colored diff nodes only when their details are opened; release those nodes when collapsed while preserving locally paged data. Repeated host metadata no longer mutates or discards the paged view.
+- Retain v8 and earlier resources for saved cards, including their historical identities. New operations allocate no widget identities; model-visible result text and the eight-tool interface remain unchanged.
+
 ## 0.4.5 — runtime simplification and card history
 
 - Separate shared operation auditing and executor selection from legacy MCP registration. Session and fixed-workspace startup no longer construct the legacy SSH tool catalog; all three public catalogs retain their existing schemas.

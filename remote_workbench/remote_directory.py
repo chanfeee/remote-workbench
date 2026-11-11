@@ -15,14 +15,8 @@ async def inspect_directory(executor, cwd):
     connected, message = await executor.check_connection()
     if not connected:
         raise ValueError(message)
-    code = ("import json,os,sys\n"
-            "p=os.path.realpath(sys.argv[1]); os.chdir(p)\n"
-            "print(json.dumps({'cwd':os.getcwd(),'home':os.path.expanduser('~')}))")
-    result = await executor.run_program(['python3', '-c', code, cwd], cwd='/', output_budget=2048)
-    if result.exit_code:
-        raise ValueError('Remote directory validation failed: ' + result.stderr)
     try:
-        detail = json.loads(result.stdout)
+        detail = await executor.probe_directory(cwd)
         canonical = detail['cwd']
         if not isinstance(canonical, str) or not canonical.startswith('/'):
             raise ValueError('Remote directory was not absolute')

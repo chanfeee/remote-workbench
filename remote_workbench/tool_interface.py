@@ -3,6 +3,7 @@
 Only known redundant metadata is omitted. Unknown fields, failures, warnings,
 unknown execution state and cleanup uncertainty remain visible to the agent.
 """
+import posixpath
 import re
 
 from remote_workbench import audit
@@ -11,27 +12,38 @@ from remote_workbench.call_arguments import command_text
 
 
 TOOL_NAMES = frozenset({
-    "read_file", "workspace_switch", "workspace_use_local", "exec_command",
+    "read_file", "workspace_switch", "workspace_use_local", "exec_command", "exec_batch", "inspect_batch", "review_activity",
     "apply_patch", "read_output", "fetch_image",
 })
 
 # These operations leave source files, bindings and jobs unchanged. Local
 # output caches/audit bookkeeping do not grant permission to mutate the source.
-READ_ONLY_TOOL_NAMES = frozenset({"read_file", "read_output", "fetch_image"})
+READ_ONLY_TOOL_NAMES = frozenset({"read_file", "read_output", "fetch_image", "inspect_batch", "review_activity"})
 
 CALL_SOURCE_INSTRUCTIONS = (
-    'Use supplied schemas; print returned text once. '
+    'Use schemas; print tool text once. '
     'Full output/diffs stay local; read_output pages them. Advanced tools: workspace_tools.'
+)
+
+COMMAND_BATCH_GUIDANCE = (
+    'Prefer one {commands:[argv,...]} batch of up to 8 already-known commands in the same cwd. '
+    'Submit smaller ready batches immediately. Each batch runs sequentially and returns one native result '
+    'with per-step exits. Stop on error by default. Split calls when later arguments depend on earlier output. '
+    'Shell text and single argv also work. '
 )
 
 # Clients may repeat server instructions in every deferred tool description.
 # Keep shared boundaries here; parameter details belong to each tool's schema.
 INSTRUCTIONS = (
-    'New chats start local; explicit host/cwd selects the actual directory, never a project copy. '
+    'New chats start local. Give host and absolute cwd; reuse bindings. '
     'Native tools stay local; no remote Codex CLI. '
-    'Reuse manual SSH authentication; stop on identity/SSH failure, never reauthenticate or fall back locally. '
-    'Heavy/parallel compute, scheduler and runtime/spawn tests require prior user confirmation of command/concurrency/environment, then compute_review. '
-    'Read-only inline cards show saved operations. Records cover commands, input/output and managed diffs, not arbitrary shell writes. '
+    'Use manual SSH; on identity/SSH failure stop without reauth or local fallback. '
+    'Direct heavy/parallel compute and runtime/spawn tests need user confirmation and compute_review. '
+    'Scheduler submission uses ordinary approval. '
+    'Default to inspect_batch for supported read-only probes, exec_batch for other groups. '
+    'Edit and check with apply_patch. '
+    'Inline cards show diffs and checks. Flag failures, blockers and decisions separately. '
+    'Report major actions. '
     + CALL_SOURCE_INSTRUCTIONS
 )
 
@@ -103,7 +115,7 @@ def _test_summary(result, command):
     return value
 
 
-def present_result(name, result, arguments=None):
+def present_result(name, result, arguments=None, *, workspace_cwd=None):
     value = dict(result)
     if name == "audit_get":
         # An explicit record read must retain its own original revision/origin.
@@ -116,12 +128,14 @@ def present_result(name, result, arguments=None):
             # Hiding a small successful report forces another model turn just
             # to recover the execution facts already available in this call.
     if isinstance(value.get('command_result'), dict):
-        value['command_result'] = present_result('exec_command', value['command_result'], arguments)
+        value['command_result'] = present_result('exec_command', value['command_result'], arguments,
+                                                 workspace_cwd=workspace_cwd)
     if name in {"workspace_switch", "workspace_use_local"}:
         redundant = {"thread_id", "created_at", "updated_at", "previous"}
         value = {key: item for key, item in value.items() if key not in redundant}
         if isinstance(value.get("initial"), dict):
-            value["initial"] = present_result("exec_command", value["initial"], arguments)
+            value["initial"] = present_result("exec_command", value["initial"], arguments,
+                                              workspace_cwd=workspace_cwd)
     elif name not in {"workspace_info", "workspace_resume", "workspace_history"}:
         value.pop("workspace_id", None)
         value.pop("revision", None)
@@ -132,18 +146,33 @@ def present_result(name, result, arguments=None):
             and value.get("exit_code") == 0 and value.get("execution_state") == "finished"
             and not value.get("error") and not value.get("timed_out")
             and task.get("cleanup_state") in {"not_started", "process_group_signalled"}):
-        # Origin/recovery details stay in the command record. Preserve explicit
-        # cleanup limits (including tree_confirmed=False), and unknown fields.
+        # Origin/recovery details stay in the command record.
         origin_fields = {"node", "boot_id", "version", "pid", "start_token", "task_id", "task_dir",
                          "backend", "timeout_seconds", "workload_pid", "pgid", "state", "reason", "exit_code"}
         value["remote_task"] = {key: item for key, item in task.items() if key not in origin_fields}
-        # Keep one actual path when launch and execution locations agree.
-        # Different origins, non-null identities and cleanup limits still matter.
         projected = value["remote_task"]
-        if projected.get("actual_cwd") and projected.get("launch_cwd") == projected["actual_cwd"]:
+        actual = projected.get("actual_cwd")
+        launch = projected.get("launch_cwd")
+        if actual and launch == actual:
             projected.pop("launch_cwd")
         if "origin_nonce" in projected and projected["origin_nonce"] is None:
             projected.pop("origin_nonce")
+        if (name in {"exec_command", "inspect_batch"} and value.get("output_id") and not value.get("stderr")
+                and not projected.get("origin_nonce") and projected.get("cleanup_state") == "process_group_signalled"
+                and projected.get("cleanup_scope") == "process_group" and projected.get("tree_confirmed") is False
+                and projected.get("hard_process_limit") is False):
+            # The ordinary process-group policy is documented on the tool.
+            # Keep non-default states and any new diagnostics on the wire.
+            for key in ("cleanup_state", "cleanup_scope", "tree_confirmed", "hard_process_limit"):
+                projected.pop(key)
+            requested = (arguments or {}).get("cwd")
+            expected = value.get("cwd")
+            if not expected and (workspace_cwd or (isinstance(requested, str) and requested.startswith("/"))):
+                expected = posixpath.normpath(posixpath.join(workspace_cwd or "/", requested or "."))
+            if actual and actual == expected and launch in (None, actual):
+                projected.pop("actual_cwd")
+        if not projected:
+            value.pop("remote_task")
     for key in ("stdout", "stderr"):
         if value.get(key) == "":
             value.pop(key)

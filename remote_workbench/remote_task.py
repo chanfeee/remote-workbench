@@ -16,7 +16,7 @@ import threading
 import time
 
 if "login_spec" not in globals():
-    from remote_workbench.remote_shell import login_spec
+    from remote_workbench.remote_shell import login_spec, python_worker_spec
 
 
 def machine_identity():
@@ -234,14 +234,34 @@ def forward_task_output(reader, name, root, marker):
             output.flush()
 
 
+def _batch_progress_snapshot(root):
+    maximum = 131072
+    path = root / 'batch-progress.json'
+    if path.is_symlink():
+        raise ValueError('Invalid batch progress')
+    try:
+        with path.open('rb') as source:
+            return source.read(maximum + 1)
+    except FileNotFoundError:
+        journal = root / 'batch-progress.jsonl'
+        if journal.is_symlink():
+            raise ValueError('Invalid batch progress journal')
+        with journal.open('rb') as source:
+            end = source.seek(0, os.SEEK_END)
+            source.seek(max(0, end - 2 * (maximum + 1)))
+            tail = source.read(2 * (maximum + 1))
+        # The runner may have been killed while writing the next row. A
+        # dispatch can occur only after its newline and fsync succeeded.
+        parts = tail.rsplit(b'\n', 2)
+        if len(parts) < 2:
+            raise ValueError('No complete batch checkpoint')
+        return parts[-2]
+
+
 def batch_progress(root, nonce, count=None):
     """Read only bounded structured progress, never infer step results from stdout."""
     try:
-        path = root / 'batch-progress.json'
-        if path.is_symlink() or path.stat().st_size > 131072:
-            raise ValueError('Invalid batch progress')
-        with path.open('rb') as source:
-            data = source.read(131073)
+        data = _batch_progress_snapshot(root)
         value = json.loads(data)
         if not isinstance(value, dict):
             raise ValueError('Invalid batch progress')
@@ -335,6 +355,7 @@ def supervise_task(settings):
             raise ValueError('Managed project copies are not direct working directories; select the original source')
         data = read_task_input(settings.get("stdin_bytes", 0), deadline) if foreground else b""
         command = settings['command']
+        worker_source = settings.get("python_source")
         if settings.get('batch'):
             # The argv JSON arrives on stdin, never as model-authored shell source
             # or a large SSH argv. Only this fixed runner is executable code.
@@ -344,14 +365,28 @@ def supervise_task(settings):
             source = globals().get('BATCH_RUNNER_SOURCE')
             if source is None:
                 source = Path(__file__).with_name('batch_runner.py').read_text()
-            command = python_command(source + '\nraise SystemExit(run_batch(json.load(open(' +
-                repr(str(root / 'batch-input.json')) + ')), ' + repr(str(root / 'batch-progress.json')) + ', ' + repr(task_id) + '))\n')
+            input_path = str(root / 'batch-input.json')
+            progress_path = str(root / 'batch-progress.json')
+            direct_batch = settings.get('direct_batch')
+            probe_source = globals().get('INSPECT_PROBE_SOURCE') if direct_batch else None
+            if direct_batch and not probe_source:
+                raise ValueError('Missing read-only probe code')
+            source += (f'\nraise SystemExit(run_batch(json.load(open({input_path!r})), '
+                       f'{progress_path!r}, {task_id!r}, probe_source={probe_source!r}))\n')
+            if direct_batch:
+                worker_source = source
+            else:
+                command = python_command(source)
         with tempfile.TemporaryFile() as input_file:
             input_file.write(b'' if settings.get('batch') else data)
             input_file.seek(0)
-            spec = login_spec(command, settings["cwd"], preamble=settings.get("preamble", ""),
-                              markers=settings.get("markers"), trace=settings.get("trace", False),
-                              environment=settings.get("environment"))
+            if worker_source is not None:
+                spec = python_worker_spec(worker_source, settings["cwd"],
+                                          settings.get("markers"), settings.get("environment"))
+            else:
+                spec = login_spec(command, settings["cwd"], preamble=settings.get("preamble", ""),
+                                  markers=settings.get("markers"), trace=settings.get("trace", False),
+                                  environment=settings.get("environment"))
             streams = {name: subprocess.PIPE for name in ("stdout", "stderr")} if not foreground else {}
             child_environment = dict(os.environ, **spec["env_updates"])
             if completion is None:

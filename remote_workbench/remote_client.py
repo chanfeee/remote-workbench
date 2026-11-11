@@ -7,8 +7,10 @@ from remote_workbench.remote_shell import python_command
 
 _SUPERVISOR_SOURCE = (Path(__file__).with_name("remote_shell.py").read_text() + "\n" +
                       Path(__file__).with_name("remote_task.py").read_text())
+_READ_SOURCE = Path(__file__).with_name("remote_reads.py").read_text()
 SOURCE = ("TASK_SUPERVISOR_SOURCE = " + repr(_SUPERVISOR_SOURCE) + "\nexec(TASK_SUPERVISOR_SOURCE)\n" +
           "exec(" + repr(Path(__file__).with_name("native_patch.py").read_text()) + ")\n" +
+          _READ_SOURCE + "\n" +
           Path(__file__).with_name("remote_worker.py").read_text())
 
 
@@ -16,6 +18,12 @@ async def request(executor, payload, cwd=None, timeout=None):
     payload.setdefault("max_file_size", executor.config.max_file_size)
     payload["_response_id"] = uuid.uuid4().hex
     payload["_task_policy"] = executor.config.task_policy()
+    if (payload["op"] in {"read_lines", "read_selected"}
+            and executor.remote_state_dir and not executor.config.preamble):
+        return await executor.run("read worker", cwd=cwd,
+            timeout=timeout or executor.config.file_timeout,
+            input_data=json.dumps(payload, ensure_ascii=False).encode(),
+            python_source=_READ_SOURCE + "\nread_main()\n")
     return await executor.run(python_command(SOURCE), cwd=cwd,
         timeout=timeout or executor.config.file_timeout,
         input_data=json.dumps(payload, ensure_ascii=False).encode())
