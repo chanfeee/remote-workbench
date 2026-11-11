@@ -1,7 +1,9 @@
 import json
+from types import SimpleNamespace
 import pytest
 
 from remote_workbench import audit
+from remote_workbench import remote_client
 from remote_workbench.remote_client import edit
 
 
@@ -33,3 +35,20 @@ async def test_failed_patch_is_labelled_as_failed_in_human_record(local):
     record = json.loads((audit.directory(result["output_id"]) / "record.json").read_text())
     assert record["patch_result"] == "failed" and record["diff_kind"] == "submitted_patch"
     assert (root / "example").read_text() == "different\n"
+
+
+async def test_interrupted_patch_still_saves_submitted_diff(tmp_path, monkeypatch):
+    patch = '--- a/example\n+++ b/example\n@@ -1 +1 @@\n-before\n+after\n'
+    with audit.scoped_root(tmp_path):
+        output_id = audit.create(kind='command')
+
+        async def interrupted(*args, **kwargs):
+            return SimpleNamespace(output_id=output_id, exit_code=255, stderr='connection lost',
+                                   execution_state='remote_state_unknown')
+
+        monkeypatch.setattr(remote_client, 'request', interrupted)
+        result = await edit(None, {'op': 'apply_patch', 'patch': patch})
+        assert result['error'] == 'remote_failed' and result['execution_state'] == 'remote_state_unknown'
+        assert audit.read_output(result['output_id'], 'diff')['content'] == patch
+        record = json.loads((audit.directory(output_id) / 'record.json').read_text())
+        assert record['patch_result'] == 'unconfirmed'
