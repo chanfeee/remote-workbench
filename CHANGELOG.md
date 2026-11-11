@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.25 — complete inline patch diffs
+
+- List every added, edited, deleted, and renamed file in the patch card. Expand files independently to see a unified diff with old and new line numbers.
+- Preserve the full diff for local paging, the confirmed diff after a partial write, and the submitted patch when the remote outcome is unknown.
+
 ## 0.4.24 — ordinary approval for scheduler submissions
 
 - Scheduler submission alone no longer triggers the extra compute confirmation. Direct parallel launchers and runtime wrappers retain their checks.

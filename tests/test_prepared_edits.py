@@ -228,6 +228,9 @@ def test_partial_write_failure_reports_applied_and_pending_paths(tmp_path, monke
     assert result['applied_paths']==[str(repo/'one.txt')]
     assert result['pending_paths']==[str(repo/'two.txt')]
     assert (repo/'one.txt').read_text()=='after\n' and (repo/'two.txt').read_text()=='before\n'
+    assert result['summary'] == '1\t1\tone.txt\n'
+    assert '-before\n+after\n' in result['normalized_patch']
+    assert 'two.txt' not in result['normalized_patch']
 
 
 async def test_prepared_edits_ignore_legacy_directory_claims(project, prepared_files):

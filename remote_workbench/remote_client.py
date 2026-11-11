@@ -29,6 +29,20 @@ async def request(executor, payload, cwd=None, timeout=None):
         input_data=json.dumps(payload, ensure_ascii=False).encode())
 
 
+def _save_patch(output_id, patch, *, check_only, status, partial=False):
+    with audit.open_stream(output_id, 'diff') as output:
+        output.write(patch.encode('utf-8'))
+    audit.update(output_id, diff_kind='partial_patch' if partial else 'submitted_patch',
+                 check_only=bool(check_only), patch_result=status)
+
+
+def _worker_failure(payload, result, error, **details):
+    if payload.get('op') == 'apply_patch':
+        _save_patch(result.output_id, payload['patch'], check_only=payload.get('check_only'), status='unconfirmed')
+        details.setdefault('execution_state', 'unknown')
+    return {'error': error, 'output_id': result.output_id, **details}
+
+
 async def edit(executor, payload, cwd=None, max_bytes=8192, timeout=None):
     if not 256 <= max_bytes <= 65536:
         raise ValueError("max_bytes must be between 256 and 65536")
@@ -50,20 +64,20 @@ async def edit(executor, payload, cwd=None, max_bytes=8192, timeout=None):
             payload["launch_cwd"] = origin["launch_cwd"]
     result = await request(executor, payload, cwd, timeout=timeout)
     if result.exit_code != 0:
-        return {"error": "remote_failed", "message": result.stderr, "output_id": result.output_id,
-                "execution_state": result.execution_state}
+        return _worker_failure(payload, result, 'remote_failed', message=result.stderr,
+                               execution_state=result.execution_state)
     # Structured worker output is read from the complete spool, not its preview.
     path = audit.directory(result.output_id) / "stdout"
     maximum = executor.config.max_file_size * 8 + 1048576
     if path.stat().st_size > maximum:
-        return {"error": "worker_output_too_large", "output_id": result.output_id}
+        return _worker_failure(payload, result, 'worker_output_too_large')
     try:
         data = path.read_bytes()
         marker = ("\x1eREMOTE_WORKBENCH_RESULT_" + payload["_response_id"] + ":\x1f").encode()
         position = data.index(marker) + len(marker)
         value, _ = json.JSONDecoder().raw_decode(data[position:].decode("utf-8"))
     except ValueError:
-        return {"error": "invalid_worker_output", "message": result.stdout, "output_id": result.output_id}
+        return _worker_failure(payload, result, 'invalid_worker_output', message=result.stdout)
     if payload.get('op') in {'write', 'append', 'replace', 'lines', 'apply_patch'}:
         # A valid worker reply can prove that an edit happened without proving
         # supervisor completion/cleanup. Preserve that distinction without
@@ -76,12 +90,11 @@ async def edit(executor, payload, cwd=None, max_bytes=8192, timeout=None):
     if payload.get("op") == "apply_patch":
         # The human viewer can display the submitted patch directly from disk;
         # don't echo an already supplied patch back through the model channel.
+        partial = value.get('error') == 'partial_apply' and 'normalized_patch' in value
         display_patch = value.pop("normalized_patch", payload["patch"])
-        with audit.open_stream(result.output_id, "diff") as output:
-            output.write(display_patch.encode("utf-8"))
-        audit.update(result.output_id, diff_kind="submitted_patch",
-                     check_only=bool(payload.get("check_only")),
-                     patch_result="failed" if value.get("error") else "checked" if payload.get("check_only") else "applied")
+        status = 'failed' if value.get('error') else 'checked' if payload.get('check_only') else 'applied'
+        _save_patch(result.output_id, display_patch, check_only=payload.get('check_only'), status=status,
+                    partial=partial)
     full_diff = value.pop("diff", "")
     if full_diff:
         data = full_diff.encode()
