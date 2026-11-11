@@ -95,14 +95,23 @@ def _unified_patch_paths(patch, repo, git_apply):
                 raise ValueError('Unrecognized patch file listing')
             paths.append(patch_path(repo, os.fsdecode(fields[2]))[0])
     # Numstat names the destination for a rename/copy; protect its source too.
+    renames = {}
+    rename_from = None
     for line in patch.decode('utf-8').splitlines():
         for prefix in ('rename from ', 'rename to ', 'copy from ', 'copy to '):
             if line.startswith(prefix):
-                paths.append(patch_path(repo, _git_path(line[len(prefix):]))[0])
+                path, relative = patch_path(repo, _git_path(line[len(prefix):]))
+                paths.append(path)
+                if prefix == 'rename from ':
+                    rename_from = relative
+                elif prefix == 'rename to ' and rename_from is not None:
+                    renames[os.fsencode(relative).decode('utf-8', 'replace')] = (
+                        os.fsencode(rename_from).decode('utf-8', 'replace'))
+                    rename_from = None
                 break
     if patch and not paths:
         raise ValueError('Patch has no managed file paths')
-    return paths
+    return paths, renames
 
 
 def sha(data):
@@ -214,6 +223,7 @@ def apply_patch(request):
     if guards is not None and (not isinstance(guards, dict) or not 1 <= len(guards) <= 100):
         raise ValueError('Invalid prepared edit guards')
     native = request['patch'].startswith('*** Begin Patch')
+    renames = {}
     if prepared is not None:
         if not guards:
             raise ValueError('Prepared edits require file guards')
@@ -222,7 +232,7 @@ def apply_patch(request):
         paths = native_patch_paths(request['patch'], repo)
     else:
         try:
-            paths = _unified_patch_paths(patch, repo, git_apply) if patch else []
+            paths, renames = _unified_patch_paths(patch, repo, git_apply) if patch else ([], {})
         except ValueError as exc:
             return {'error': 'patch_conflict', 'message': str(exc)}
     with lock(paths) as locked_fds:
@@ -273,27 +283,29 @@ def apply_patch(request):
         if prepared is not None:
             # All guards and the generated patch were checked before any write.
             # Record this edit's line changes without a repository or Git scan.
-            rows = []
+            rows = {}
             for name, content in prepared.items():
                 diff = list(difflib.unified_diff(originals[name].decode('utf-8').splitlines(keepends=True),
                                                  content.splitlines(keepends=True)))
                 added = sum(line.startswith('+') for line in diff[2:])
                 removed = sum(line.startswith('-') for line in diff[2:])
                 if diff:
-                    rows.append(str(added) + '\t' + str(removed) + '\t' + str(Path(name).relative_to(repo)))
-            summary_text = '\n'.join(rows) + ('\n' if rows else '')
+                    rows[name] = f'{added}\t{removed}\t{Path(name).relative_to(repo)}\n'
+            summary_text = ''.join(rows[name] for name in originals if name in rows)
             if not request.get('check_only'):
                 applied = []
-                for name, content in prepared.items():
-                    after = content.encode('utf-8')
-                    if after != originals[name]:
-                        try:
-                            atomic_write(Path(name), after, originals[name])
-                        except (OSError, ValueError) as exc:
-                            return {'error': 'partial_apply' if applied else 'apply_failed', 'message': str(exc),
-                                    'applied_paths': applied,
-                                    'pending_paths': [p for p in prepared if p not in applied]}
-                        applied.append(name)
+                for name in rows:
+                    try:
+                        atomic_write(Path(name), prepared[name].encode('utf-8'), originals[name])
+                    except (OSError, ValueError) as exc:
+                        failure = {'error': 'partial_apply' if applied else 'apply_failed', 'message': str(exc),
+                                   'applied_paths': applied, 'pending_paths': [p for p in rows if p not in applied]}
+                        if applied:
+                            failure['summary'] = ''.join(rows[p] for p in applied)
+                            failure['normalized_patch'] = prepared_file_patch(
+                                {p: originals[p] for p in applied}, {p: prepared[p] for p in applied}, repo)
+                        return failure
+                    applied.append(name)
         else:
             # Git's normal path/context protections apply in both worktrees and
             # plain directories. No index, repository creation or project scan.
@@ -303,8 +315,10 @@ def apply_patch(request):
             check = subprocess.run([*git_apply, "--check", "--whitespace=nowarn", "-"], **child_options)
             if check.returncode:
                 return {"error": "patch_conflict", "message": check.stderr.decode("utf-8", "replace")}
-            summary = subprocess.run([*git_apply, "--numstat", "-"], check=True, **child_options)
-            summary_text = summary.stdout.decode('utf-8', 'replace')
+            summary = subprocess.run([*git_apply, "--numstat", "-z", "-"], check=True, **child_options)
+            # Managed patch paths cannot contain tabs or newlines. Keep the
+            # line-based result without Git's quoted filename presentation.
+            summary_text = summary.stdout.decode('utf-8', 'replace').replace('\0', '\n')
             if not request.get('check_only'):
                 result = subprocess.run([*git_apply, "--whitespace=nowarn", "-"], **child_options)
                 if result.returncode:
@@ -313,6 +327,8 @@ def apply_patch(request):
                   "patch_sha256": sha(patch), "changed": bool(summary_text)}
         if native:
             result["normalized_patch"] = patch.decode("utf-8")
+        if renames:
+            result['renamed_paths'] = renames
         return result
 
 

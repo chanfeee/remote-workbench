@@ -12,7 +12,7 @@ function boot(initial) {
   const el=id=>{if(!elements.has(id))elements.set(id,{innerHTML:'',textContent:'',hidden:false,handlers:{},removeAttribute(){},getBoundingClientRect(){return {height:contentHeight};},addEventListener(name,fn){this.handlers[name]=fn;}});return elements.get(id);};
   const parent={postMessage:message=>messages.push(message)};
   let serial=0;
-  const context={Map,Set,JSON,Number,Array,Object,Boolean,String,Error,Promise,
+  const context={Map,Set,JSON,Number,Array,Object,Boolean,String,Error,Promise,TextEncoder,TextDecoder,
     document:{getElementById:el,documentElement:{scrollHeight:1800}},
     ResizeObserver:class{constructor(fn){observer=fn;}observe(target){assert.equal(target,el('content'));}},
     window:{parent,openai:initial?{toolResponseMetadata:initial}:undefined,addEventListener:(name,fn)=>{events[name]=fn;}},
@@ -81,12 +81,14 @@ const command={tool:'exec_command',host:'server',cwd:'/run',command:hostile,stat
   app.deliver({method:'ui/notifications/tool-result',params:wrap([patch])});
   const review=app.el('review');
   assert(!review.hidden&&activity.hidden);
-  assert(review.innerHTML.includes('预览 · 1 个远程文件'));
+  assert(review.innerHTML.includes('预览 · 1 个文件变更'));
   assert(review.innerHTML.includes('class="file-change"'));
   assert(!review.innerHTML.includes('class="line added"'));
   const diffBody=app.toggle('review','rwb-detail-0-file-0');
-  assert(diffBody.innerHTML.includes('class="line added">+&lt;img'));
-  assert(diffBody.innerHTML.includes('class="line deleted">-old'));
+  assert(diffBody.innerHTML.includes('class="line added"')&&diffBody.innerHTML.includes('class="line-code">&lt;img'));
+  assert(diffBody.innerHTML.includes('class="line deleted"')&&diffBody.innerHTML.includes('class="line-code">old'));
+  assert(!diffBody.innerHTML.includes('--- a/sample.py'));
+  assert.equal((diffBody.innerHTML.match(/class="gutter" aria-hidden="true">1</g)||[]).length,2);
   app.toggle('review','rwb-detail-0-file-0',false);
   assert.equal(diffBody.innerHTML,'');
   assert(review.innerHTML.includes('class="add">+1'));
@@ -116,6 +118,12 @@ const command={tool:'exec_command',host:'server',cwd:'/run',command:hostile,stat
   assert(review.innerHTML.includes('状态未知')&&review.innerHTML.includes('class="file-change"'));
   app.deliver({method:'ui/notifications/tool-result',params:wrap([{...patch,state:'remote_state_unknown',error:'apply_failed'}])});
   assert(review.innerHTML.includes('状态未知')&&review.innerHTML.includes('apply_failed'));
+  assert(review.innerHTML.includes('查看提交的补丁')&&!review.innerHTML.includes('class="file-change"'));
+  const appliedPatch={...patch,check_only:false,error:'partial_apply',applied_diff:true,pending_paths:['pending.txt'],
+    diff_summary:{...patch.diff_summary,files:[{path:'sample.py',previous_path:'before.py',added:1,deleted:1}]}};
+  app.deliver({method:'ui/notifications/tool-result',params:wrap([appliedPatch])});
+  assert(review.innerHTML.includes('待处理 pending.txt')&&review.innerHTML.includes('before.py → sample.py'));
+  assert(app.toggle('review','rwb-detail-0-file-0').innerHTML.includes('class="line-code">old'));
   app.deliver({method:'ui/notifications/tool-result',params:wrap([{...command,state:'failed',executed:false,exit_code:null,error:'compute_review_required',streams:{}}])});
   assert(activity.innerHTML.includes('未执行')&&!activity.innerHTML.includes('1 项失败'));
   app.deliver({method:'ui/notifications/tool-cancelled',params:{}});
@@ -125,6 +133,48 @@ const command={tool:'exec_command',host:'server',cwd:'/run',command:hostile,stat
   app.deliver({method:'ui/notifications/tool-result',params:wrap([partial])});
   assert(review.innerHTML.includes('（片段）'));
   assert(app.toggle('review','rwb-detail-0-diff').innerHTML.includes('data-stream="diff"'));
+  const largePatch={...partial,output_id:patch.operation_id,diff_summary:{
+    complete:true,added:1,deleted:2,files:[
+      {path:'sample.py',added:1,deleted:1},{path:'empty.txt',added:0,deleted:0},
+      {path:'删除.txt',added:0,deleted:1},
+    ],
+  }};
+  app.deliver({method:'ui/notifications/tool-result',params:wrap([largePatch])});
+  assert(review.innerHTML.includes('3 个文件变更')&&!review.innerHTML.includes('（片段）'));
+  assert(review.innerHTML.includes('empty.txt')&&review.innerHTML.includes('删除.txt'));
+  const largeBody=app.toggle('review','rwb-detail-0-diff');
+  assert(largeBody.innerHTML.includes('data-stream="diff"')&&!largeBody.innerHTML.includes('删除.txt'));
+  const diffButton={dataset:{step:'0',stream:'diff'},disabled:false,hidden:false};
+  const moreDiff=review.handlers.click({target:{closest:()=>diffButton}});await tick();
+  const diffCall=app.messages.filter(x=>x.method==='tools/call').at(-1);
+  assert.equal(diffCall.params.arguments.cursor,90);
+  app.deliver({id:diffCall.id,result:{structuredContent:{content:'--- a/删除.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-removed\n',next_cursor:150,truncated:false}}});
+  await moreDiff;
+  assert(app.el('rwb-output-0-diff').innerHTML.includes('class="line-code">removed'));
+  assert(diffButton.hidden);
+  const indexed=boot();
+  indexed.deliver({id:indexed.messages[0].id,result:{}});await tick();
+  const later='--- a/删除.txt\n+++ /dev/null\n@@ -47 +0,0 @@\n-removed\n';
+  const laterEnd=4200+Buffer.byteLength(later);
+  const indexedPatch={...largePatch,diff_summary:{...largePatch.diff_summary,files:[
+    {path:'sample.py',added:1,deleted:1,range:[0,4200]},
+    {path:'删除.txt',added:0,deleted:1,range:[4200,laterEnd]},
+  ]}};
+  indexed.deliver({method:'ui/notifications/tool-result',params:wrap([indexedPatch])});
+  assert(!indexed.messages.some(x=>x.method==='tools/call'));
+  assert(!indexed.el('review').innerHTML.includes('查看逐行 diff'));
+  indexed.toggle('review','rwb-detail-0-file-1');await tick();
+  const laterCall=indexed.messages.find(x=>x.method==='tools/call');
+  assert.equal(laterCall.params.arguments.cursor,4200);
+  assert.equal(laterCall.params.arguments.max_bytes,Buffer.byteLength(later));
+  indexed.deliver({id:laterCall.id,result:{structuredContent:{content:later,next_cursor:laterEnd,truncated:true}}});
+  await tick();
+  assert(indexed.el('rwb-output-0-diff-1').innerHTML.includes('aria-hidden="true">47<'));
+  assert(indexed.el('rwb-output-0-diff-1').innerHTML.includes('class="line-code">removed'));
+  assert(indexed.el('rwb-more-0-diff-1').hidden);
+  indexed.toggle('review','rwb-detail-0-file-1',false);
+  assert(indexed.toggle('review','rwb-detail-0-file-1').innerHTML.includes('class="line-code">removed'));
+  assert.equal(indexed.messages.filter(x=>x.method==='tools/call').length,1);
   // Metadata bootstrap can show a saved card with no additional model request.
   const saved=boot(wrap([command])._meta);
   assert(saved.el('activity').innerHTML.includes('命令 <span class="section-count">1</span>'));
@@ -140,7 +190,7 @@ const command={tool:'exec_command',host:'server',cwd:'/run',command:hostile,stat
   const delayed=boot();
   delayed.events['openai:set_globals']({detail:{globals:{toolResponseMetadata:{call_tool_result:wrap([patch])}}}});
   assert(!delayed.el('review').hidden);
-  assert(delayed.toggle('review','rwb-detail-0-file-0').innerHTML.includes('class="line deleted">-old'));
+  assert(delayed.toggle('review','rwb-detail-0-file-0').innerHTML.includes('class="line-code">old'));
   assert(!delayed.messages.some(x=>x.method==='tools/call'));
   const restored=delayed.el('review').innerHTML;
   delayed.events['openai:set_globals']({detail:{globals:{theme:'dark'}}});
@@ -182,7 +232,7 @@ const command={tool:'exec_command',host:'server',cwd:'/run',command:hostile,stat
   checked._meta['remote-workbench/operation'].compact=true;
   const verification=boot({call_tool_result:checked});
   const verificationMarkup=verification.el('activity').innerHTML;
-  assert(verification.el('review').innerHTML.includes('1 个远程文件'));
+  assert(verification.el('review').innerHTML.includes('1 个文件变更'));
   assert(verificationMarkup.includes('验证')&&verificationMarkup.includes('1 项通过 · 1 项失败 · 未执行'));
   assert(verificationMarkup.includes('role="alert"')&&verificationMarkup.includes('第 2 项 失败'));
   assert(verificationMarkup.includes('<details class="activity-group">'));

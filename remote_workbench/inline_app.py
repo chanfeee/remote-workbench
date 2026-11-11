@@ -1,5 +1,8 @@
 """Inline activity and diff cards backed by the chat-scoped audit spool."""
+from contextlib import suppress
 import json
+import mmap
+import re
 from pathlib import Path
 from uuid import uuid4
 
@@ -13,21 +16,48 @@ from remote_workbench.presentation import parse_unified_diff, summarize_record
 from remote_workbench.session_context import get_codex_identity
 from remote_workbench.tools.audit import ssh_audit_get
 
-RESOURCE_URI = 'ui://remote-workbench/operation-v12.html'
+RESOURCE_URI = 'ui://remote-workbench/operation-v13.html'
 BATCH_RESOURCE_URI = 'ui://remote-workbench/batch-v1.html'
 HISTORICAL_RESOURCE_URIS = tuple(f'ui://remote-workbench/operation-v{version}.html'
-                                 for version in (2, 4, 5, 6, 7, 8, 9, 10, 11))
+                                 for version in (2, 4, 5, 6, 7, 8, 9, 10, 11, 12))
 CARD_TOOLS = frozenset({'review_activity', 'apply_patch'})
 PREVIEW_BYTES = 4096
+_GIT_DIFF_HEADER = re.compile(rb'^diff --git ', re.MULTILINE)
+_UNIFIED_DIFF_HEADER = re.compile(rb'^--- [^\n]*\n\+\+\+ [^\n]*\n(?=@@ )', re.MULTILINE)
 
 
 def _record(record_id):
-    if not record_id:
-        return {}
-    path = audit.directory(record_id) / 'record.json'
-    if path.stat().st_size > 512 * 1024:
-        return {}
-    return json.loads(path.read_text())
+    if record_id:
+        with suppress(OSError, ValueError):
+            path = audit.directory(record_id) / 'record.json'
+            if path.stat().st_size <= 512 * 1024:
+                record = json.loads(path.read_text())
+                if isinstance(record, dict):
+                    return record
+    return {}
+
+
+def _patch_file_summary(numstat):
+    """List the whole patch from worker counts, independently of preview bytes."""
+    if not numstat:
+        return None
+    files = []
+    for row in numstat.rstrip('\n').split('\n'):
+        added, deleted, path = row.split('\t', 2)
+        files.append({'path': path, 'added': None if added == '-' else int(added),
+                      'deleted': None if deleted == '-' else int(deleted)})
+    return {'files': files, 'added': sum(row['added'] or 0 for row in files),
+            'deleted': sum(row['deleted'] or 0 for row in files), 'complete': True}
+
+
+def _add_diff_ranges(files, patch):
+    """Index saved file sections by byte offset without sending their contents."""
+    starts = [header.start() for header in _GIT_DIFF_HEADER.finditer(patch)]
+    if not starts:
+        starts = [header.start() for header in _UNIFIED_DIFF_HEADER.finditer(patch)]
+    if len(starts) == len(files):
+        for file, start, end in zip(files, starts, [*starts[1:], len(patch)]):
+            file['range'] = [start, end]
 
 
 def _step(result, tool, command, *, operation=None, source=None, preview_bytes=PREVIEW_BYTES):
@@ -41,10 +71,26 @@ def _step(result, tool, command, *, operation=None, source=None, preview_bytes=P
     if output_id:
         directory = audit.directory(output_id)
         for name in ('diff',) if tool == 'apply_patch' else ('stdout', 'stderr'):
-            if (directory / name).is_file():
-                streams[name] = audit.read_output(output_id, name, max_bytes=preview_bytes)
+            with suppress(OSError):
+                if (directory / name).is_file():
+                    streams[name] = audit.read_output(output_id, name, max_bytes=preview_bytes)
     diff = streams.get('diff')
-    diff_summary = parse_unified_diff(diff['content'], complete=not diff['truncated']) if diff else None
+    diff_summary = _patch_file_summary(result.get('summary')) if tool == 'apply_patch' else None
+    if diff_summary and result.get('renamed_paths'):
+        for file in diff_summary['files']:
+            previous = result['renamed_paths'].get(file['path'])
+            if previous is not None:
+                file['previous_path'] = previous
+    if diff_summary and diff:
+        if diff['truncated']:
+            # An unavailable index must not hide the complete file list.
+            with suppress(OSError, ValueError), (directory / 'diff').open('rb') as source_file:
+                with mmap.mmap(source_file.fileno(), 0, access=mmap.ACCESS_READ) as patch:
+                    _add_diff_ranges(diff_summary['files'], patch)
+        else:
+            _add_diff_ranges(diff_summary['files'], diff['content'].encode('utf-8'))
+    if diff_summary is None and diff and not result.get('error'):
+        diff_summary = parse_unified_diff(diff['content'], complete=not diff['truncated'])
     remote_task = result.get('remote_task') or source.get('remote_task') or {}
     step = dict(tool=tool, output_id=output_id, operation_id=operation_id,
                 host=result.get('host') or view.get('host'), cwd=result.get('cwd') or view.get('workspace_path'),
@@ -59,10 +105,12 @@ def _step(result, tool, command, *, operation=None, source=None, preview_bytes=P
         if isinstance(result.get('message'), str):
             step['message'] = result['message'][:512]
         if step['error'] == 'partial_apply':
+            if source.get('diff_kind') == 'partial_patch' and diff_summary:
+                step['applied_diff'] = True
             for key in ('applied_paths', 'pending_paths'):
                 paths = result.get(key)
                 if isinstance(paths, list):
-                    step[key] = [path[:256] for path in paths[:8] if isinstance(path, str)]
+                    step[key] = [path for path in paths if isinstance(path, str)]
     summary = result.get('test_summary')
     if tool == 'exec_command' and isinstance(summary, dict):
         step['test_summary'] = {key: summary[key] for key in ('status', 'passed', 'reported_skips', 'executed')

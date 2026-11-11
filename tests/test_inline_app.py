@@ -1,4 +1,5 @@
 """New operations stay native text; archived cards remain readable on demand."""
+import hashlib
 import json
 import shutil
 import subprocess
@@ -68,6 +69,91 @@ async def test_patch_text_keeps_original_diff_and_followup_result(project):
     patch, check = card['steps']
     assert patch['tool'] == 'apply_patch' and '-original\n+updated' in patch['streams']['diff']['content']
     assert check['tool'] == 'exec_command' and check['streams']['stdout']['content'] == 'checked'
+
+
+async def test_large_patch_card_lists_every_changed_file_before_paging(project):
+    _, server, source, _ = project
+    (source / '删除.txt').write_text('remove this\n')
+    line = 'x' * 5000
+    wire = await wire_call(server, 'a', 'apply_patch', host='a', cwd=str(source), patch=[
+        '*** Begin Patch', '*** Add File: large.txt', '+' + line,
+        '*** Update File: value.txt', '@@', '-original', '+updated',
+        '*** Add File: empty.txt', '*** Delete File: 删除.txt', '*** End Patch',
+    ])
+    result = text_result(wire)
+    assert result.get('success'), result
+    assert (source / 'large.txt').read_text() == line + '\n'
+    assert (source / 'value.txt').read_text() == 'updated\n'
+    assert (source / 'empty.txt').is_file() and not (source / '删除.txt').exists()
+    step, = wire.meta['remote-workbench/operation']['steps']
+    preview, summary = step['streams']['diff'], step['diff_summary']
+    assert preview['truncated'] and 'value.txt' not in preview['content']
+    assert summary['complete'] and (summary['added'], summary['deleted']) == (2, 2)
+    assert [(row['path'], row['added'], row['deleted']) for row in summary['files']] == [
+        ('large.txt', 1, 0), ('value.txt', 1, 1), ('empty.txt', 0, 0), ('删除.txt', 0, 1),
+    ]
+    later_start, later_end = summary['files'][1]['range']
+    assert later_start > preview['next_cursor']
+    later = text_result(await wire_call(server, 'a', 'read_output', output_id=result['output_id'],
+                                       stream='diff', cursor=later_start, max_bytes=later_end - later_start))
+    assert '-original\n+updated\n' in later['content'] and 'empty.txt' not in later['content']
+    assert later['next_cursor'] == later_end
+    tail = text_result(await wire_call(server, 'a', 'read_output', output_id=result['output_id'],
+                                      stream='diff', cursor=preview['next_cursor']))
+    assert '-original\n+updated\n' in tail['content'] and '-remove this\n' in tail['content']
+    assert not tail.get('truncated')
+    assert hashlib.sha256((preview['content'] + tail['content']).encode()).hexdigest() == result['patch_sha256']
+
+
+async def test_git_rename_diff_preserves_both_paths(project):
+    _, server, source, _ = project
+    patch = ('diff --git a/value.txt b/renamed.txt\nsimilarity index 100%\n'
+             'rename from value.txt\nrename to renamed.txt\n')
+    wire = await wire_call(server, 'a', 'apply_patch', host='a', cwd=str(source), patch=patch)
+    result = text_result(wire)
+    assert result['success'] and (source / 'renamed.txt').read_text() == 'original\n'
+    assert not (source / 'value.txt').exists()
+    step, = wire.meta['remote-workbench/operation']['steps']
+    row, = step['diff_summary']['files']
+    assert (row['previous_path'], row['path']) == ('value.txt', 'renamed.txt')
+    saved = text_result(await wire_call(server, 'a', 'read_output', output_id=result['output_id'], stream='diff'))
+    assert saved['content'] == patch
+
+
+def test_partial_patch_card_keeps_all_confirmed_paths():
+    applied = [f'/work/path-{index}.txt' for index in range(10)]
+    pending = ['/work/pending.txt']
+    block = types.TextContent(type='text', text=json.dumps({
+        'error': 'partial_apply', 'applied_paths': applied, 'pending_paths': pending,
+    }))
+    card = inline_app.attach_patch_card([block], {})
+    step, = card.meta['remote-workbench/operation']['steps']
+    assert step['applied_paths'] == applied and step['pending_paths'] == pending
+
+
+def test_patch_card_reads_saved_diff_when_optional_record_is_missing(tmp_path):
+    patch = '--- a/value.txt\n+++ b/value.txt\n@@ -1 +1 @@\n-old\n+new\n'
+    with audit.scoped_root(tmp_path):
+        output_id = '1' * 32
+        audit.directory(output_id).mkdir()
+        with audit.open_stream(output_id, 'diff') as stream:
+            stream.write(patch.encode())
+        block = types.TextContent(type='text', text=json.dumps({
+            'success': True, 'output_id': output_id, 'summary': '1\t1\tvalue.txt\n',
+        }))
+        card = inline_app.attach_patch_card([block], {})
+    step, = card.meta['remote-workbench/operation']['steps']
+    assert step['streams']['diff']['content'] == patch
+    assert step['diff_summary']['files'][0]['path'] == 'value.txt'
+
+
+def test_indexes_plain_unified_patch_by_byte_offset():
+    first = '--- a/一.txt\n+++ b/一.txt\n@@ -1 +1 @@\n-old\n+new\n'.encode()
+    second = b'--- a/two.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-remove\n'
+    files = [{'path': '一.txt'}, {'path': 'two.txt'}]
+    inline_app._add_diff_ranges(files, first + second)
+    assert files[0]['range'] == [0, len(first)]
+    assert files[1]['range'] == [len(first), len(first + second)]
 
 
 async def test_native_batch_retains_all_steps_in_one_tool_result(project):
