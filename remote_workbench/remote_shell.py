@@ -3,6 +3,7 @@ import base64
 import os
 import pwd
 import shlex
+import sys
 import zlib
 
 
@@ -34,6 +35,28 @@ def python_command(source):
                 'import base64,zlib;exec(zlib.decompress(base64.b64decode("' + encoded + '")))')
     encoded = base64.b64encode(data).decode("ascii")
     return "python3 -c " + shlex.quote('import base64;exec(base64.b64decode("' + encoded + '"))')
+
+
+def output_marker_source(markers):
+    code = "import os\n"
+    for stream, descriptor in (("stdout", 1), ("stderr", 2)):
+        marker = markers[stream].encode("utf-8")
+        code += "os.write(" + str(descriptor) + ", " + repr(marker) + ".replace(b'%s', os.getcwdb(), 1))\n"
+    return code
+
+
+def python_worker_spec(source, cwd, markers, environment):
+    """Launch a fixed Python worker in the selected directory without a login shell."""
+    target = os.path.abspath(os.path.expanduser(cwd))
+    bootstrap = (
+        "import os,sys\n"
+        f"try:\n os.chdir({target!r})\n"
+        "except OSError as exc:\n print(exc, file=sys.stderr)\n raise SystemExit(125)\n"
+    )
+    if markers:
+        bootstrap += output_marker_source(markers)
+    return {"shell": sys.executable, "argv": [sys.executable, "-I", "-c", bootstrap + source],
+            "env_updates": environment or {}}
 
 
 def login_spec(command, cwd, preamble="", markers=None, trace=False, environment=None):
@@ -71,11 +94,7 @@ def login_spec(command, cwd, preamble="", markers=None, trace=False, environment
     else:
         parts.append("cd " + quote(target) + " || exit 125")
     if markers:
-        code = "import os\n"
-        for stream, descriptor in (("stdout", 1), ("stderr", 2)):
-            marker = markers[stream].encode("utf-8")
-            code += "os.write(" + str(descriptor) + ", " + repr(marker) + ".replace(b'%s', os.getcwdb(), 1))\n"
-        parts.append(python_command(code))
+        parts.append(python_command(output_marker_source(markers)))
     if trace:
         if family == "csh":
             parts.append("set echo")

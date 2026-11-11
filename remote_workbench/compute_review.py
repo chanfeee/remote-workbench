@@ -11,11 +11,12 @@ from remote_workbench import audit
 
 
 REVIEW_INSTRUCTIONS = (
-    " Before substantial computation, batch submission, high parallelism, or tests of runtime/spawn wrappers, "
+    " Before directly launching substantial computation, high parallelism, or tests of runtime/spawn wrappers, "
     "show the exact command, expected concurrency, host/cwd and environment to the user and wait for explicit confirmation. "
     "Then pass compute_review={concurrency:...,environment:...,confirmation:...}. "
     "Never invent user confirmation or treat generic permission to test as approval of a compute plan. "
-    "Inspect scripts when fan-out is unclear. Ordinary file operations and small tests run directly. "
+    "Inspect scripts when fan-out is unclear. Scheduler submission itself uses ordinary tool approval. "
+    "Ordinary file operations and small tests run directly. "
     "Review is an agent workflow; command-line detection is incomplete and imposes no OS resource cap. "
 )
 
@@ -59,8 +60,8 @@ def compute_risks(command, threshold=8):
         # python -c CODE --help still executes CODE; mpirun app --help runs app.
         if len(words) == 2 and words[1] in {"--help", "--version", "-h"}:
             continue
-        if program in {"mpirun", "mpiexec", "srun", "sbatch", "qsub", "bsub", "condor_submit", "parallel", "torchrun"}:
-            risks.append(program + " launches or submits a compute workload")
+        if program in {"mpirun", "mpiexec", "srun", "parallel", "torchrun"}:
+            risks.append(program + " launches a compute workload")
         options = []
         if program in {"make", "gmake", "ninja", "cmake", "ctest", "pytest", "py.test", "bazel", "xargs"}:
             flags = (r"-n|--numprocesses=?" if program in {"pytest", "py.test"} else

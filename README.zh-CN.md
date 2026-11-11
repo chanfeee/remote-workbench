@@ -9,7 +9,7 @@ Remote Workbench 让本地 Agent 在明确选定的 SSH 服务器和工程目录
 - 在本地与多台服务器之间切换，每个聊天独立保存绑定。
 - 通过冲突检查读写文件，查看命令、输出和受管修改。
 - 启动、查询、停止后台任务，并按原执行位置恢复。
-- 用 App 只读内联卡片查看操作，通过 CLI 查询本地记录，将远端图片拉取到聊天中展示。
+- 用原生文本查看操作，通过 CLI 查询本地记录，将远端图片拉取到聊天中展示。
 
 ## 快速开始
 
@@ -25,7 +25,7 @@ cd remote-workbench
 uv sync --frozen
 ```
 
-SSH MCP 和内联卡片只需默认安装。代理网关按需使用 `uv sync --frozen --extra proxy`，独立 Web/PTY 启动器使用 `uv sync --frozen --extra web`（启动命令为 `python -m remote_workbench.web`）；wheel 安装对应 `remote-workbench[proxy]` 或 `remote-workbench[web]`。本地审计网页使用标准库，仍可通过 `python -m remote_workbench.audit_web` 独立启动。
+SSH MCP、原生文本回复和旧卡片兼容只需默认安装。代理网关按需使用 `uv sync --frozen --extra proxy`，独立 Web/PTY 启动器使用 `uv sync --frozen --extra web`（启动命令为 `python -m remote_workbench.web`）；wheel 安装对应 `remote-workbench[proxy]` 或 `remote-workbench[web]`。本地审计网页使用标准库，仍可通过 `python -m remote_workbench.audit_web` 独立启动。
 
 ### 2. 配置服务器
 
@@ -103,9 +103,9 @@ Session 路由依赖客户端提供 `_meta.threadId`；缺少可用的聊天身�
 
 `0.4.2` 的 MCP 入口不再启动独立 HTML 服务、不分配查看页端口，也不返回网页链接。关闭内联卡片不影响执行，也不会删除记录。旧 stable 安装在明确升级前保留原有行为。
 
-**内联操作卡片：** `exec_command` 和 `apply_patch` 声明只读 MCP Apps 卡片，兼容客户端可在聊天中直接显示记录的服务器、实际 cwd、命令、进程状态、有界输出或受管 diff。“继续读取”通过 UI 桥接调用已有的本地 `read_output`，不重新执行命令，也不需要模型渲染页面。预览放在结果 `_meta` 中，模型可见的结果文本不变，工具目录仍为 8 项。组件不加载外部资源，也不请求本机 HTTP 页面。`0.4.4` 默认显示命令／文件行，并在资源元数据中去除桌面的最低高度限制，使收起输出或 diff 时卡片能按实际内容缩小。不支持内联组件的客户端保留普通工具结果、本地记录和 CLI 查询。独立 stable 安装和审批设置另行更新。
+两条以上已确定的命令可用 `exec_batch` 一次执行并返回内联卡。首次在同一调用中传入 `host` 和绝对 `cwd`，同时完成绑定。分开调用 `exec_command` 时，可按需用返回的 `operation_id` 调用 `review_activity(operation_ids=[...])` 汇总。汇总卡默认折叠，展开可看命令、退出码和输出，单条命令也可汇总。每组建议最多 8 条命令。补丁卡显示改动文件和逐行差异。完整记录可通过 `read_output` 查看。
 
-`0.4.5` 为各次操作保留独立卡片，并从保存的结果恢复显示，不重新执行命令。缺少标识的旧卡片不会被改写，兼容范围及验收状态见[历史卡片说明](docs/inline-card-history.md)。App 的启停开关仍由用户控制。
+已发行的 `0.4.5` 使用独立内联卡片。旧资源继续支持按需读取，并取消强制内联显示；升级不删除旧记录，也不重新执行命令。兼容范围见[文本与历史记录说明](docs/inline-card-history.md)。现有安装须明确更新并重载后才使用新行为，App 的启停开关仍由用户控制。
 
 关闭 App 后，仍可使用 `workspace_info` 中的本地状态目录和 workspace ID 查看已有记录：
 
@@ -119,7 +119,7 @@ remote-workbench records --data-dir STATE_DIR --workspace-id WORKSPACE_ID --id O
 
 受管编辑记录本次修改。Git diff 是显式获取的当前差异；操作记录不会追踪任意 shell 命令或外部终端造成的所有文件写入。
 
-内联前端直接复用 liteRemote 的活动与文件审阅组件：按组展示命令、退出码和耗时，以及逐文件增删行数和可展开的彩色 diff。退出码 0 不覆盖远端完成／清理未知，审核拒绝和取消待确认分别显示。省去说明性页脚、可见记录 ID、重复命令标签和空分组。stable 0.4.5 已在实际 App 加载并通过真实 SSH 调用；用户确认切换聊天再返回后，两张命令卡片和两张 diff 卡片均保留，逐行 diff 可以展开查看。完整 App 重启与 UI 分页仍需分别验收，不据此推导接近本地的 token／耗时结果。
+历史查看器继续保留命令、状态事实和转义后的 diff。完成或清理未知、取消待确认、拒绝执行与非零退出在文本记录及旧预览中均保留区别。已发行 0.4.5 的卡片切换验收属于历史验证，不代表本次原生文本候选或实际输入延迟已通过验收。
 
 查看图片时，可以让 Agent 展示远端 PNG/JPG 或 PDF 的指定页。`fetch_image` 保存本地副本并返回聊天预览引用，不将 base64 放入 MCP 文本。PDF/SVG 预览需要可选的本地渲染包：
 

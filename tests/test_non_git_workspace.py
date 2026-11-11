@@ -122,10 +122,8 @@ async def test_directory_binding_does_not_probe_git(tmp_path):
     class Executor:
         async def check_connection(self):
             return True, 'connected'
-        async def run_program(self, argv, **kwargs):
-            assert 'git' not in argv[2] and 'subprocess' not in argv[2]
-            result = subprocess.run(argv, capture_output=True, cwd=kwargs['cwd'], text=True, check=True)
-            return type('Result', (), {'stdout':result.stdout, 'exit_code':0})()
+        async def probe_directory(self, cwd):
+            return {'cwd': str(Path(cwd).resolve()), 'home': str(Path.home())}
     detail = await inspect_directory(Executor(), str(tmp_path))
     assert detail['cwd'] == str(tmp_path.resolve())
     assert not (tmp_path/'.git').exists()

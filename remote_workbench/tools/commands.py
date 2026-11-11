@@ -12,8 +12,8 @@ from remote_workbench.tool_runtime import audited_operation, require_connection,
 from remote_workbench.remote_client import edit
 from remote_workbench import job_collector
 from remote_workbench.compute_review import check_compute_review
-from remote_workbench.call_arguments import command_text, validate_call_arguments
-from remote_workbench.command_spec import Command
+from remote_workbench.call_arguments import COMMAND_PREVIEW_BYTES, command_text, validate_call_arguments
+from remote_workbench.command_spec import Command, CommandBatch, validate_batch
 from remote_workbench.remote_program import program_command
 
 _SAFE_JOB_ID = re.compile(r"^[a-zA-Z0-9_-]{1,80}$")
@@ -55,15 +55,36 @@ async def ssh_run(command: Command, cwd: str | None = None, timeout: int | None 
     else:
         result = await executor.run(command, cwd=cwd, timeout=timeout, output_budget=max_bytes, trace=trace,
                                     **input_options)
+    return _command_result(result, batch=isinstance(command, dict))
+
+
+def _command_result(result, *, batch):
     value = {"stdout": result.stdout, "stderr": result.stderr, "exit_code": result.exit_code,
             "timed_out": result.timed_out, "truncated": result.truncated,
             "output_id": result.output_id, "execution_state": result.execution_state,
             "remote_task": result.remote_task}
-    if isinstance(command, dict):
+    if batch:
         value['steps'] = (result.remote_task or {}).get('batch', [])
         value['batch_state'] = (result.remote_task or {}).get('batch_state', 'unknown')
         value['remote_task'] = {k:v for k,v in (result.remote_task or {}).items() if k not in {'batch', 'batch_state'}}
     return value
+
+
+@audited_operation
+async def ssh_inspect_batch(command: CommandBatch, cwd: str | None = None) -> dict:
+    """Execute fixed, bounded read-only probes at the selected remote directory."""
+    from remote_workbench.inspect_probes import normalize_probe
+
+    validate_batch(command)
+    if len(command['commands']) > 8:
+        raise ValueError('inspect_batch accepts at most 8 commands')
+    commands = [normalize_probe(argv) for argv in command['commands']]
+    executor = await require_connection()
+    payload = dict(command, commands=commands)
+    result = await executor.run('read-only argv batch', cwd=cwd, timeout=10, output_budget=COMMAND_PREVIEW_BYTES,
+        display_command=command_text(command), batch=True, direct_batch=True,
+        input_data=json.dumps(payload, ensure_ascii=False).encode())
+    return _command_result(result, batch=True)
 
 
 @audited_operation

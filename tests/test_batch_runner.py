@@ -5,6 +5,7 @@ import sys
 import pytest
 
 from remote_workbench.batch_runner import run_batch
+from remote_workbench import batch_runner
 
 
 def _python_command(code, *args):
@@ -49,12 +50,12 @@ def test_progress_is_private_and_running_is_written_before_spawn(tmp_path, capfd
     status_path = tmp_path / "status.json"
     code = (
         "import json,sys; "
-        "status=json.load(open(sys.argv[1], encoding='utf-8')); "
+        "status=json.loads(open(sys.argv[1], encoding='utf-8').readlines()[-1]); "
         "print(json.dumps(status['steps'][0]))"
     )
 
     result = run_batch(
-        {"commands": [_python_command(code, str(status_path))]},
+        {"commands": [_python_command(code, str(status_path) + "l")]},
         status_path,
         "nonce-雪",
     )
@@ -76,6 +77,7 @@ def test_progress_is_private_and_running_is_written_before_spawn(tmp_path, capfd
     assert final_status["steps"][0]["exit_code"] == 0
     assert isinstance(final_status["steps"][0]["elapsed_ms"], int)
     assert stat.S_IMODE(status_path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(status_path.with_suffix(".jsonl").stat().st_mode) == 0o600
     assert list(tmp_path.glob(".batch-status-*.tmp")) == []
 
 
@@ -119,6 +121,29 @@ def test_continue_on_error_returns_first_nonzero_code(tmp_path):
         "finished",
     ]
     assert [step["exit_code"] for step in status["steps"]] == [9, 4, 0]
+
+
+def test_progress_uses_one_sync_per_dispatch_and_one_for_completion(tmp_path, monkeypatch):
+    snapshots = []
+    write_status = batch_runner._write_status
+    append_checkpoint = batch_runner._append_checkpoint
+
+    def record(path, status):
+        write_status(path, status)
+        snapshots.append(([step['state'] for step in status['steps']], status['complete']))
+
+    def checkpoint(stream, status):
+        append_checkpoint(stream, status)
+        snapshots.append(([step['state'] for step in status['steps']], status['complete']))
+
+    monkeypatch.setattr(batch_runner, '_write_status', record)
+    monkeypatch.setattr(batch_runner, '_append_checkpoint', checkpoint)
+    assert run_batch({'commands': [_python_command('pass')] * 2}, tmp_path / 'status.json', 'batch') == 0
+    assert snapshots == [
+        (['running', 'not_started'], False),
+        (['finished', 'running'], False),
+        (['finished', 'finished'], True),
+    ]
 
 
 def test_missing_executable_is_127_with_bounded_error_and_facts(tmp_path):

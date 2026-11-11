@@ -1,5 +1,6 @@
 """A Git submodule must not force a project snapshot during direct binding."""
 import subprocess
+from pathlib import Path
 
 from remote_workbench.session_server import create_server
 from tests.test_session_server import call, router_at
@@ -21,13 +22,8 @@ async def test_bind_repository_with_gitlink_without_git_probe(tmp_path):
         async def check_connection(self):
             return True, 'connected'
 
-        async def run_program(self, argv, **kwargs):
-            # Binding may inspect the directory, never enumerate Git files,
-            # initialize submodules, or create a project copy.
-            assert argv[:2] == ['python3', '-c']
-            assert 'git' not in argv[2] and 'subprocess' not in argv[2]
-            result = subprocess.run(argv, cwd=kwargs['cwd'], capture_output=True, text=True, check=True)
-            return type('Result', (), {'stdout': result.stdout, 'exit_code': 0})()
+        async def probe_directory(self, cwd):
+            return {'cwd': str(Path(cwd).resolve()), 'home': str(Path.home())}
 
     router = router_at(tmp_path / 'state')
     router.executor_factory = lambda *args, **kwargs: DirectoryExecutor()

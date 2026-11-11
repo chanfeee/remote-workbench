@@ -6,6 +6,9 @@ from remote_workbench.native_patch import validate_native_patch_syntax
 from remote_workbench.edit_spec import edits_patch, prepared_edits, validate_prepared_edits
 
 
+COMMAND_PREVIEW_BYTES = 4096
+
+
 def command_text(command):
     """Readable command for review/audit; argv execution uses program_command."""
     if isinstance(command, dict):

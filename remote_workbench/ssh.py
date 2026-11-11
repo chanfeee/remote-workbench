@@ -11,6 +11,7 @@ import hashlib
 import shutil
 import json
 from pathlib import Path
+from uuid import uuid4
 from remote_workbench import audit
 from dataclasses import dataclass
 
@@ -18,6 +19,10 @@ from remote_workbench.config import HostConfig
 
 # How long a successful connection check remains valid (seconds).
 _CHECK_CACHE_TTL = 5.0
+_MUX_FD_FAILURE = "mux_client_request_session: send fds failed"
+_MUX_FD_GUIDANCE = ("The local SSH client could not pass file descriptors to the existing "
+                    "ControlMaster. Stop remote operations and have the user verify the "
+                    "connection in their terminal before resuming.")
 
 
 @dataclass
@@ -131,6 +136,8 @@ class SSHExecutor:
         trace: bool = False,
         display_command: str | None = None,
         batch: bool = False,
+        python_source: str | None = None,
+        direct_batch: bool = False,
     ) -> SSHResult:
         """Run a command on the remote host.
 
@@ -161,7 +168,8 @@ class SSHExecutor:
             host=self.config.ssh_target, cwd=cwd, command=display_command or command, status="starting",
             stdin_bytes=len(input_data or b""), stdin_sha256=hashlib.sha256(input_data or b"").hexdigest())
         audit.add_child(audit.operation_id.get(), record_id)
-        wrapped = self._wrap_command(command, cwd, record_id, trace, timeout, len(input_data or b""), batch=batch)
+        wrapped = self._wrap_command(command, cwd, record_id, trace, timeout, len(input_data or b""),
+                                     batch=batch, python_source=python_source, direct_batch=direct_batch)
         if batch:
             audit.update(record_id, command_batch=json.loads(input_data))
         audit.update(record_id, wrapped_command=wrapped, shell_trace=trace)
@@ -372,6 +380,10 @@ class SSHExecutor:
             message = (f"Timed out after {timeout}s; " +
                        (f"cleanup: {remote_task.get('cleanup_state', 'unconfirmed')}. " if acknowledged else "remote state unknown. "))
             contents["stderr"], _ = audit.preview((message + contents["stderr"]).encode(), err_budget)
+        if transport_failed and _MUX_FD_FAILURE in contents["stderr"]:
+            contents["stderr"], clipped = audit.preview(
+                (_MUX_FD_GUIDANCE + "\n" + contents["stderr"]).encode(), err_budget)
+            truncated |= clipped
         return SSHResult(contents["stdout"], contents["stderr"], exit_code, timed_out,
                          record_id, truncated, state, remote_task)
 
@@ -383,6 +395,52 @@ class SSHExecutor:
         if self.config.port != 22:
             args.extend(["-p", str(self.config.port)])
         return [*args, self.config.ssh_target, command]
+
+    async def probe_directory(self, cwd: str) -> dict:
+        """Read the canonical directory and account home over the existing master."""
+        from remote_workbench.remote_shell import python_command
+
+        if not self.config.execution_enabled:
+            raise ValueError("Remote execution is disabled; this host has been paused")
+        marker = f"\nREMOTE_WORKBENCH_DIRECTORY_{uuid4().hex}:".encode()
+        source = (
+            "import json,os\n"
+            f"os.chdir(os.path.realpath({cwd!r}))\n"
+            "detail = {'cwd': os.getcwd(), 'home': os.path.expanduser('~')}\n"
+            f"os.write(1, {marker!r} + json.dumps(detail).encode() + b'\\n')\n"
+        )
+        process = await asyncio.create_subprocess_exec(*self._ssh_args("exec " + python_command(source)),
+            stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT)
+        async def read_probe():
+            try:
+                await process.stdout.readexactly(16385)
+            except asyncio.IncompleteReadError as exc:
+                return await process.wait(), exc.partial
+            raise ValueError("Remote directory validation produced too much output")
+
+        try:
+            code, output = await asyncio.wait_for(read_probe(), self.config.command_timeout)
+        except asyncio.TimeoutError as exc:
+            raise ValueError("Remote directory validation timed out") from exc
+        finally:
+            if process.returncode is None:
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass
+                await process.communicate()
+        if code:
+            diagnostic = output[-2048:].decode(errors="replace").strip()
+            if code == 255 and _is_ssh_error(diagnostic):
+                self.invalidate_cache()
+            if code == 255 and _MUX_FD_FAILURE in diagnostic:
+                diagnostic = _MUX_FD_GUIDANCE + "\n" + diagnostic
+            raise ValueError("Remote directory validation failed: " + diagnostic)
+        _, found, detail = output.rpartition(marker)
+        if not found:
+            raise ValueError("Invalid remote directory validation result")
+        return json.loads(detail.partition(b"\n")[0])
 
     async def cancel_task(self, task_id: str, *, kind: str = "jobs",
                           origin: dict | None = None) -> dict:
@@ -498,7 +556,8 @@ class SSHExecutor:
         self._last_check_ok = False
 
     def _wrap_command(self, command: str, cwd: str, record_id: str = "", trace: bool = False,
-                      timeout: int | None = None, stdin_bytes: int = 0, batch: bool = False) -> str:
+                      timeout: int | None = None, stdin_bytes: int = 0, batch: bool = False,
+                      python_source: str | None = None, direct_batch: bool = False) -> str:
         """Start the configured account shell, without assuming its syntax."""
         from remote_workbench.remote_shell import python_command
         markers = None
@@ -510,10 +569,13 @@ class SSHExecutor:
         arguments = dict(command=command, cwd=cwd, preamble=self.config.preamble,
                          markers=markers, trace=trace, environment=environment,
                          policy=self.config.task_policy(), timeout=timeout or self.config.command_timeout,
-                         task_id=task_id, stdin_bytes=stdin_bytes, batch=batch)
+                         task_id=task_id, stdin_bytes=stdin_bytes, batch=batch,
+                         python_source=python_source, direct_batch=direct_batch)
         bootstrap = Path(__file__).with_name("remote_shell.py").read_text()
         if batch:
             bootstrap += '\nBATCH_RUNNER_SOURCE = ' + repr(Path(__file__).with_name('batch_runner.py').read_text())
+        if direct_batch:
+            bootstrap += '\nINSPECT_PROBE_SOURCE = ' + repr(Path(__file__).with_name('inspect_probes.py').read_text())
         bootstrap += "\n" + Path(__file__).with_name("remote_task.py").read_text()
         bootstrap += "\n_settings = " + repr(arguments) + "\n"
         if self.remote_state_dir:
