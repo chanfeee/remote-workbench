@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.27 — read-only workspace lookup
+
+- Expose `workspace_info` directly so Codex in `writes` mode can query the current binding and MCP version without an approval. The existing gateway call remains supported.
+
 ## 0.4.26 — verify file edits in the patch request
 
 - Verify the written bytes and deletions for context patches and guarded edits before releasing the managed file locks. Return the result with the complete saved diff.

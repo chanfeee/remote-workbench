@@ -66,7 +66,7 @@ async def test_schema_context_injection_and_missing_identity_fail_closed(tmp_pat
     router = router_at(tmp_path)
     server = create_server(router)
     tools = await server.list_tools()
-    assert len(tools) == 11
+    assert len(tools) == 12
     assert "workspace_tools" in {tool.name for tool in tools}
     advanced = await call(server, "catalog", "workspace_tools", tool="describe", arguments={"name":"resolve_operation"})
     assert advanced["name"] == "resolve_operation"

@@ -12,13 +12,13 @@ from remote_workbench.call_arguments import command_text
 
 
 TOOL_NAMES = frozenset({
-    "read_file", "workspace_switch", "workspace_use_local", "exec_command", "exec_batch", "inspect_batch", "review_activity",
+    "read_file", "workspace_info", "workspace_switch", "workspace_use_local", "exec_command", "exec_batch", "inspect_batch", "review_activity",
     "apply_patch", "read_output", "fetch_image",
 })
 
 # These operations leave source files, bindings and jobs unchanged. Local
 # output caches/audit bookkeeping do not grant permission to mutate the source.
-READ_ONLY_TOOL_NAMES = frozenset({"read_file", "read_output", "fetch_image", "inspect_batch", "review_activity"})
+READ_ONLY_TOOL_NAMES = frozenset({"workspace_info", "read_file", "read_output", "fetch_image", "inspect_batch", "review_activity"})
 
 CALL_SOURCE_INSTRUCTIONS = (
     'Use schemas and print tool text once. read_output pages saved streams without SSH. Advanced: workspace_tools.'

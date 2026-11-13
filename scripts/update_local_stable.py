@@ -40,8 +40,13 @@ async def check():
             async with ClientSession(reader, writer) as client:
                 await client.initialize()
                 tools = await client.list_tools()
-                assert len(tools.tools) == 11
                 by_name = {tool.name: tool for tool in tools.tools}
+                # This updater can also install older stable refs, which expose
+                # workspace_info through the gateway only.
+                info_tool = by_name.get('workspace_info')
+                assert len(by_name) == (12 if info_tool else 11)
+                if info_tool:
+                    assert info_tool.annotations.readOnlyHint
                 assert 'Use exec_batch' in by_name['exec_command'].description
                 assert by_name['review_activity'].annotations.readOnlyHint
                 assert by_name['inspect_batch'].annotations.readOnlyHint
@@ -61,8 +66,9 @@ async def check():
                 assert 'ui/initialize' in resource.contents[0].text
                 assert resource.contents[0].meta['openai/widgetMinFrameHeight'] == 0
                 assert resource.contents[0].meta['openai/widgetShowCodexWidgetInline'] is True
-                response = await client.call_tool('workspace_tools', {'tool': 'workspace_info'},
-                    meta={'threadId': 'local-install-smoke'})
+                name = 'workspace_info' if info_tool else 'workspace_tools'
+                arguments = {} if info_tool else {'tool': 'workspace_info'}
+                response = await client.call_tool(name, arguments, meta={'threadId': 'local-install-smoke'})
                 assert not response.isError
                 info = json.loads(response.content[0].text)
                 assert info['mode'] == 'local' and not info['bound']
