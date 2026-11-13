@@ -102,7 +102,7 @@ TOOLS = [
     ("job_status", commands.ssh_job_status, "Read detached job state and incremental output. Reuse returned byte cursors."),
     ("job_wait", commands.ssh_job_wait, "Wait on collector progress or exit without repeated remote-status polling. May start a read-only collector recovery channel; wait expiry does not cancel the job."),
     ("stop_job", commands.ssh_stop_job, "Cancel a supervised job on its originating node. Inspect cleanup_state; remains available when execution is disabled."),
-    ("read_output", audit_tools.ssh_read_output, "Page saved output by output_id, stream and byte cursor; full command output and edit diffs are retained locally."),
+    ("read_output", audit_tools.ssh_read_output, "Page this chat's saved output by output_id and byte cursor. Use stream='diff' for a patch. This reads local records without a remote target."),
     ("search_output", audit_tools.ssh_search_output, "Search saved local output with bounded context and byte cursors; no SSH command."),
     ("audit_get", audit_tools.ssh_audit_get, "Read a local operation record, including actual remote commands and child IDs."),
     ("audit_list", audit_tools.ssh_audit_list, "List recent local operation metadata."),

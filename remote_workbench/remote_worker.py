@@ -118,6 +118,42 @@ def sha(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def verify_patch_files(repo, expected, maximum):
+    """Verify compiled file contents under the same managed locks as the write."""
+    failures = []
+    for name, digest in expected.items():
+        try:
+            path, _ = patch_path(repo, name)
+            if digest is None:
+                path.lstat()
+                problem = 'still_exists'
+            else:
+                fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                with os.fdopen(fd, 'rb') as source:
+                    before = os.fstat(source.fileno())
+                    if not stat.S_ISREG(before.st_mode) or before.st_size > maximum:
+                        raise ValueError('Not a regular file within the size limit')
+                    data = source.read(maximum + 1)
+                    after = os.fstat(source.fileno())
+                current = path.lstat()
+                if (len(data) > maximum or not os.path.samestat(before, current) or
+                        (before.st_size, before.st_mtime_ns, before.st_ctime_ns) !=
+                        (after.st_size, after.st_mtime_ns, after.st_ctime_ns)):
+                    problem = 'changed_during_read'
+                elif sha(data) == digest:
+                    continue
+                else:
+                    problem = 'content_mismatch'
+        except FileNotFoundError:
+            if digest is None:
+                continue
+            problem = 'missing'
+        except (OSError, ValueError):
+            problem = 'unreadable'
+        failures.append({'path': name, 'error': problem})
+    return {'checked': len(expected), 'failed': failures}
+
+
 def atomic_write(path, data, previous):
     info = path.stat() if path.exists() else None
     if path.is_symlink():
@@ -200,6 +236,8 @@ def edit(request):
 
 def apply_patch(request):
     patch = request["patch"].encode("utf-8")
+    check_only = bool(request.get('check_only'))
+    maximum = request.get('max_file_size', 10485760)
     prepared = request.get('prepared_contents')
     expected_repo = request.get('expected_repository')
     if prepared is not None:
@@ -275,8 +313,9 @@ def apply_patch(request):
         if not patch:
             return {'success': True, 'check_only': bool(request.get('check_only')),
                     'summary': '', 'patch_sha256': sha(patch), 'changed': False}
+        expected = {} if native and not check_only else None
         if native:
-            patch = compile_native_patch(request["patch"], repo, request.get("max_file_size", 10485760)).encode("utf-8")
+            patch = compile_native_patch(request['patch'], repo, maximum, expected=expected).encode('utf-8')
             if not patch:
                 return {"success": True, "check_only": bool(request.get("check_only")),
                         "summary": "", "patch_sha256": sha(patch), "normalized_patch": ""}
@@ -292,7 +331,7 @@ def apply_patch(request):
                 if diff:
                     rows[name] = f'{added}\t{removed}\t{Path(name).relative_to(repo)}\n'
             summary_text = ''.join(rows[name] for name in originals if name in rows)
-            if not request.get('check_only'):
+            if not check_only:
                 applied = []
                 for name in rows:
                     try:
@@ -306,27 +345,33 @@ def apply_patch(request):
                                 {p: originals[p] for p in applied}, {p: prepared[p] for p in applied}, repo)
                         return failure
                     applied.append(name)
+                expected = {str(Path(name).relative_to(repo)): sha(prepared[name].encode('utf-8'))
+                            for name in applied}
         else:
             # Git's normal path/context protections apply in both worktrees and
             # plain directories. No index, repository creation or project scan.
             # Git can still be writing if its Python parent exits. Inherit the
             # lock descriptors so the actual mutator keeps exclusion until exit.
             child_options = {'input': patch, 'capture_output': True, 'pass_fds': locked_fds}
-            check = subprocess.run([*git_apply, "--check", "--whitespace=nowarn", "-"], **child_options)
+            statistics = ['--numstat', '-z']
+            check = subprocess.run([*git_apply, '--check', '--whitespace=nowarn',
+                                    *(statistics if check_only else []), '-'], **child_options)
             if check.returncode:
                 return {"error": "patch_conflict", "message": check.stderr.decode("utf-8", "replace")}
-            summary = subprocess.run([*git_apply, "--numstat", "-z", "-"], check=True, **child_options)
+            summary = check
+            if not check_only:
+                summary = subprocess.run([*git_apply, '--apply', '--whitespace=nowarn', *statistics, '-'], **child_options)
+                if summary.returncode:
+                    return {'error': 'apply_failed', 'message': summary.stderr.decode('utf-8', 'replace')}
             # Managed patch paths cannot contain tabs or newlines. Keep the
             # line-based result without Git's quoted filename presentation.
             summary_text = summary.stdout.decode('utf-8', 'replace').replace('\0', '\n')
-            if not request.get('check_only'):
-                result = subprocess.run([*git_apply, "--whitespace=nowarn", "-"], **child_options)
-                if result.returncode:
-                    return {"error": "apply_failed", "message": result.stderr.decode("utf-8", "replace")}
-        result = {"success": True, "check_only": bool(request.get("check_only")), "summary": summary_text,
+        result = {"success": True, "check_only": check_only, "summary": summary_text,
                   "patch_sha256": sha(patch), "changed": bool(summary_text)}
         if native:
             result["normalized_patch"] = patch.decode("utf-8")
+        if expected:
+            result['file_verification'] = verify_patch_files(repo, expected, maximum)
         if renames:
             result['renamed_paths'] = renames
         return result

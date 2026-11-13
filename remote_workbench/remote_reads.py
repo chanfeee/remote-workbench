@@ -28,7 +28,7 @@ def read_lines(request):
             info = path.stat()
         except FileNotFoundError:
             return {'error': 'file_not_found', 'path': str(path),
-                    'message': 'File does not exist. Edit snapshots require an existing file; create a new file with workspace_tools("apply_patch") Add File or workspace_tools("write_file").'}
+                    'message': 'File does not exist. Use apply_patch with an Add File directive.'}
         if not stat.S_ISREG(info.st_mode):
             return {'error': 'not_regular_file', 'path': str(path),
                     'message': 'Edit snapshots require a regular file; the selected path is a directory or another file type.'}

@@ -21,8 +21,7 @@ TOOL_NAMES = frozenset({
 READ_ONLY_TOOL_NAMES = frozenset({"read_file", "read_output", "fetch_image", "inspect_batch", "review_activity"})
 
 CALL_SOURCE_INSTRUCTIONS = (
-    'Use schemas; print tool text once. '
-    'Full output/diffs stay local; read_output pages them. Advanced tools: workspace_tools.'
+    'Use schemas and print tool text once. read_output pages saved streams without SSH. Advanced: workspace_tools.'
 )
 
 COMMAND_BATCH_GUIDANCE = (
@@ -40,10 +39,9 @@ INSTRUCTIONS = (
     'Use manual SSH; on identity/SSH failure stop without reauth or local fallback. '
     'Direct heavy/parallel compute and runtime/spawn tests need user confirmation and compute_review. '
     'Scheduler submission uses ordinary approval. '
-    'Default to inspect_batch for supported read-only probes, exec_batch for other groups. '
-    'Edit and check with apply_patch. '
-    'Inline cards show diffs and checks. Flag failures, blockers and decisions separately. '
-    'Report major actions. '
+    'Use inspect_batch for supported reads and exec_batch for other groups. '
+    'Use apply_patch with known checks. Inline cards show saved diffs and verification. '
+    'Report major actions, failures and decisions. '
     + CALL_SOURCE_INSTRUCTIONS
 )
 
