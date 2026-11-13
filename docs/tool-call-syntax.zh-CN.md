@@ -42,7 +42,9 @@
 
 ## 准确的工具标注
 
-八个工具保持不变。`read_file`、`read_output` 和 `fetch_image` 通过 MCP annotations 声明不修改远端源码、聊天绑定或任务；本地审计、快照和预览缓存照常保存。它们限定在已绑定账户／工作区或本地已保存输出，不能据此执行任意 shell。
+直接调用 `workspace_info` 可查询当前聊天的绑定和 MCP 版本。它只读取本地状态，Codex 的 `writes` 模式会跳过这项只读工具的审批。旧的 `workspace_tools(tool="workspace_info")` 调用仍可用。
+
+`read_file`、`read_output`、`fetch_image`、`inspect_batch` 和 `review_activity` 也带只读标注。它们限定在已绑定账户／工作区或本地已保存输出；本地审计、快照和预览缓存照常保存。
 
 `exec_command`、`apply_patch`、绑定控制及混合 `workspace_tools` 网关没有被标成只读。特别是，网关的查询操作不意味着其中的写入／任务操作也能免审。标注不替代服务端认证、校验、文件级写入协调或计算审核；调用方是否采用它及审批行为仍由客户端策略决定。[OpenAI 工具标注说明](https://developers.openai.com/plugins/build/mcp-server)
 
@@ -83,7 +85,7 @@
 - 记录从工具执行时自动写入本地，包含用户命令、host、实际初始 cwd、提供的 stdin、stdout/stderr、退出状态、超时/取消及任务标识。SSH/shell传输包装保留在详情中。
 - `apply_patch` 保存完整补丁。Codex 聊天内的 diff 卡片显示文件清单，展开文件即可查看逐行变更。模型收到有界结果和 `output_id`，可用 `read_output(stream="diff")` 分页读回补丁。
 - 显式 `git diff` 是当前工作树差异；普通 shell 任意写入不等于完整逐文件审计。需要记录代码修改时使用受管补丁；对其它 shell 写入明确获取适用的差异，不宣称监控了任意程序的全部文件写入。
-- 八个公开工具是一套接口，没有 full/compact 运行模式，也不强制固定三次调用。记录、token统计与工程任务规划相互独立；费用工具仅用于手动基准。
+- 公开工具使用同一套接口，没有 full/compact 运行模式，也不强制固定三次调用。记录、token统计与工程任务规划相互独立；费用工具仅用于手动基准。
 
 本地开发源码的接口变化需安装并重载客户端后才生效，运行中的 stable 不会自动更新。`workspace_info.runtime` 可显式查看实际版本、包路径与data-dir，不增加默认探测回合。
 

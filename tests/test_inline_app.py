@@ -478,7 +478,7 @@ async def test_stdio_binds_activity_and_diff_cards_and_keeps_archived_resources(
         async with ClientSession(read, write) as client:
             await client.initialize()
             tools = (await client.list_tools()).tools
-            assert len(tools) == 11
+            assert len(tools) == 12
             for tool in tools:
                 meta = tool.meta or {}
                 expected = inline_app.RESOURCE_URI if tool.name in inline_app.CARD_TOOLS else None

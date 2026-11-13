@@ -22,7 +22,7 @@ async def test_only_source_read_operations_advertise_readonly_hints(tmp_path):
     server = create_server(router)
     tools = await server.list_tools()
     assert {tool.name for tool in tools} == TOOL_NAMES | {'workspace_tools'}
-    assert len(tools) == 11
+    assert len(tools) == 12
     for tool in tools:
         if tool.name in READ_ONLY_TOOL_NAMES:
             assert tool.annotations.readOnlyHint is True
@@ -161,12 +161,20 @@ async def test_actual_stdio_exports_hints_and_optional_selection_schema(tmp_path
         async with ClientSession(read, write) as client:
             await client.initialize()
             catalog = await client.list_tools()
-            assert len(catalog.tools) == 11
+            assert len(catalog.tools) == 12
             for tool in catalog.tools:
                 assert bool(tool.annotations and tool.annotations.readOnlyHint) == (tool.name in READ_ONLY_TOOL_NAMES)
             command = next(tool for tool in catalog.tools if tool.name == 'exec_command')
             assert {'read_files', 'edit_files'} <= command.inputSchema['properties'].keys()
             assert 'read_files' not in command.inputSchema.get('required', [])
-            reply = await client.call_tool('workspace_tools', {'tool': 'workspace_info'}, meta={'threadId': 'local-approval-test'})
+            info = next(tool for tool in catalog.tools if tool.name == 'workspace_info')
+            assert info.annotations.readOnlyHint is True and not info.inputSchema.get('properties')
+            meta = {'threadId': 'local-approval-test'}
+            reply = await client.call_tool('workspace_info', meta=meta)
+            assert not reply.isError and reply.meta is None
             value = json.loads(reply.content[0].text)
             assert value['mode'] == 'local' and value['host'] is None
+            legacy = await client.call_tool('workspace_tools', {'tool': 'workspace_info'}, meta=meta)
+            assert not legacy.isError and json.loads(legacy.content[0].text) == value
+            missing_identity = await client.call_tool('workspace_info')
+            assert missing_identity.isError

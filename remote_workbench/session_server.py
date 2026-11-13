@@ -592,7 +592,7 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
             server.tool(structured_output=False, annotations=annotations)(invoke)
 
     for name, function, description in (
-        ("workspace_info", info, "Inspect this thread's persistent workspace and metadata identity. No remote execution."),
+        ("workspace_info", info, "Read this chat's current binding and loaded MCP version from local state."),
         ("workspace_history", history, "Read this thread's previous host/source-directory bindings, newest first."),
         ("workspace_resume", resume, "Build a local-only recovery summary of this thread's binding, saved jobs and note; legacy test history is read only when include_legacy_test_history=true."),
         ("workspace_note", note, "Read or update this thread's small local recovery note (goal, constraints, decisions, next_step)."),
@@ -677,7 +677,7 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
 
     @server.tool(structured_output=False)
     async def workspace_tools(tool: str, arguments: dict | None = None, ctx: Context = None) -> str:
-        """Advanced tools by name: jobs, recovery, notes, search/edits. tool='describe', arguments={name:'start_job'} returns just that schema; omit name for available names. Normal tasks use exec_command, review_activity or apply_patch directly."""
+        """Advanced tools by name: jobs, recovery, notes, search/edits. tool='describe', arguments={name:'start_job'} returns just that schema; omit name for available names. Use workspace_info directly for the current binding and version."""
         identity = get_codex_identity(ctx)
         if arguments is not None and not isinstance(arguments, dict):
             raise ToolError("arguments must be an object")
