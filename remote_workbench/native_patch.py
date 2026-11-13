@@ -5,6 +5,7 @@ executes a command or writes a file. The worker checks generated diffs before
 applying changes. Matching is exact and ambiguous hunks fail.
 """
 import difflib
+import hashlib
 import json
 from pathlib import Path
 import stat
@@ -108,7 +109,7 @@ def native_patch_paths(text, repo):
     return paths
 
 
-def compile_native_patch(text, repo, max_file_size=10485760):
+def compile_native_patch(text, repo, max_file_size=10485760, *, expected=None):
     validate_native_patch_syntax(text)
     lines = text.splitlines()
     if not lines or lines[0] != "*** Begin Patch" or lines[-1] != "*** End Patch":
@@ -137,6 +138,8 @@ def compile_native_patch(text, repo, max_file_size=10485760):
     def emit(name, before, after, executable=False):
         if before is not None and after is not None and before == after:
             return
+        if expected is not None:
+            expected[name] = None if after is None else hashlib.sha256(after.encode('utf-8')).hexdigest()
         a, b = json.dumps("a/" + name, ensure_ascii=False), json.dumps("b/" + name, ensure_ascii=False)
         header = "diff --git " + a + " " + b + "\n"
         mode = "100755" if executable else "100644"

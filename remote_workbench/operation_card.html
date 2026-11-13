@@ -218,6 +218,9 @@ button:disabled{opacity:.6;cursor:default}
       const statuses=checks.map(outcome);
       const failures = reads.filter((item) => item.success === false).length +
                        statuses.filter(item=>['failed','timeout'].includes(item.kind)).length;
+      const fileCheck = payload.file_verification;
+      const fileFailures = fileCheck?.failed || [];
+      const checkedFiles = (fileCheck?.checked || 0) - fileFailures.length;
       const outcomes = payload.verification ? [...statuses, ...commands.map(outcome)] : statuses;
       const notice=['decision','unknown','cancelling','running','timeout','cancelled','not_run','unverified']
         .map(kind=>outcomes.find(item=>item.kind===kind)).find(Boolean);
@@ -228,7 +231,9 @@ button:disabled{opacity:.6;cursor:default}
           Number.isInteger(summary.reported_skips) && summary.reported_skips > 0
             ? `${summary.reported_skips} 个测试跳过` : ''] : [];
       }) : [];
-      const statusLabel=[payload.verification && passed ? `${passed} 项通过` : '',
+      const statusLabel=[checkedFiles ? `${checkedFiles} 个文件已核对` : '',
+        fileFailures.length ? `${fileFailures.length} 个文件核对失败` : '',
+        payload.verification && passed ? `${passed} 项通过` : '',
         failures?`${failures} 项失败`:'',notice?.label,...tests].filter(Boolean).join(' · ') ||
         (payload.verification && !checks.length ? '未运行' : '已完成');
       const cwdNote = payload.cwd_count > 1 ? ` · ${payload.cwd_count} 个目录` : "";
@@ -244,12 +249,14 @@ button:disabled{opacity:.6;cursor:default}
         return `<div class="error" role="alert">${[status.label, ...failedSteps, diagnostic]
           .filter(Boolean).map(escapeHtml).join('<br>')}</div>`;
       }).join('') : '';
+      const fileAlerts = fileFailures.map(({path,error}) => `${path} · ${error}`);
       root.innerHTML = `
         <header class="header">
           <span class="title">${payload.verification ? '验证' : '命令'} <span class="section-count">${commands.reduce((count, item) => count + (item.batch_steps?.length || 1), 0)}</span></span>
           <span class="workspace">${escapeHtml(payload.host)} · ${escapeHtml(payload.cwd || "")}${cwdNote}</span>
-          <span class="status ${failures ? "failed" : notice ? "warning" : ""}">${statusLabel}</span>
+          <span class="status ${failures || fileFailures.length ? "failed" : notice ? "warning" : ""}">${statusLabel}</span>
         </header>
+        ${fileAlerts.length ? `<div class="error" role="alert">${fileAlerts.map(escapeHtml).join('<br>')}</div>` : ''}
         ${alerts}
         ${!commands.length ? '' : payload.compact ? `<details class="activity-group"><summary>查看命令与输出</summary>${list}</details>` : list}
         `;
@@ -409,6 +416,7 @@ button:disabled{opacity:.6;cursor:default}
     const context = commands[0] || patchStep;
     activityRoot.hidden=!commands.length && !verification;
     if(!activityRoot.hidden)activityView.render({success:true,reads:[],commands,verification,compact:payload.compact===true,
+      file_verification:outcome(patchStep || {}).kind==='complete' ? patchStep?.file_verification : undefined,
       host:context.host || '',cwd:context.cwd || '',cwd_count:new Set(commands.map(s=>s.cwd)).size});
     contentRoot.removeAttribute('data-pending');needsResize=true;observedHeight=undefined;
     return true;

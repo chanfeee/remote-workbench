@@ -521,6 +521,7 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
                         initial = result.get("initial", {})
                         following = result.get('command_result', {})
                         failed = bool(result.get("error") or result.get("initial_error") or result.get("timed_out") or
+                                      (result.get('file_verification') or {}).get('failed') or
                                       result.get("exit_code") not in (None, 0) or
                                       initial.get("error") or initial.get("timed_out") or
                                       initial.get("exit_code") not in (None, 0) or
@@ -576,12 +577,11 @@ def create_server(router: SessionRouter, *, viewer_url: str | None = None,
                     read_files=read_files, edit_files=edit_files, host=host, ctx=ctx)
             structured_apply_patch.__name__ = "apply_patch"
             structured_apply_patch.__doc__ = (
-                "Apply local-style context patches (Add/Delete supported) or unified diffs. Optional edits use guarded snapshots; pass patch or edits. "
-                "Include already-known post-edit checks in command={commands:[argv,...]} for one edit/check result (prefer up to 8 checks). Shell text/argv also work. "
-                "read_files/edit_files explicitly return files after edits/checks; edit_files includes fresh guarded IDs. "
-                "For patch text, pass host and absolute cwd to bind and apply in one call. "
-                "check_only cannot run command. The inline card shows the patch diff and verification status. "
-                "Check output defaults to a 4 KiB preview. Full records are saved.")
+                "Apply a context patch or unified diff, or pass guarded edits. Context patches and guarded edits verify file contents and deletions automatically. "
+                "Include already-known post-edit checks in command={commands:[argv,...]} or use argv or shell text. "
+                "read_files/edit_files return selected files after checks; edit_files adds guarded IDs. "
+                "Reuse the binding or pass host with absolute cwd for patch text. check_only cannot run command. "
+                "The card shows the diff and checks. Use read_output only if you need the saved text.")
             server.tool(structured_output=False)(structured_apply_patch)
             tool_metadata = server._tool_manager.get_tool("apply_patch")
             model = tool_metadata.fn_metadata.arg_model

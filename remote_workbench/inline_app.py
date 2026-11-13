@@ -16,10 +16,10 @@ from remote_workbench.presentation import parse_unified_diff, summarize_record
 from remote_workbench.session_context import get_codex_identity
 from remote_workbench.tools.audit import ssh_audit_get
 
-RESOURCE_URI = 'ui://remote-workbench/operation-v13.html'
+RESOURCE_URI = 'ui://remote-workbench/operation-v14.html'
 BATCH_RESOURCE_URI = 'ui://remote-workbench/batch-v1.html'
 HISTORICAL_RESOURCE_URIS = tuple(f'ui://remote-workbench/operation-v{version}.html'
-                                 for version in (2, 4, 5, 6, 7, 8, 9, 10, 11, 12))
+                                 for version in (2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13))
 CARD_TOOLS = frozenset({'review_activity', 'apply_patch'})
 PREVIEW_BYTES = 4096
 _GIT_DIFF_HEADER = re.compile(rb'^diff --git ', re.MULTILINE)
@@ -133,6 +133,8 @@ def attach_patch_card(blocks, arguments):
     result = json.loads(blocks[0].text)
     command = arguments.get('command', arguments.get('cmd'))
     steps = [_step(result, 'apply_patch', command)]
+    if isinstance(result.get('file_verification'), dict):
+        steps[0]['file_verification'] = result['file_verification']
     if isinstance(result.get('command_result'), dict):
         steps.append(_step(result['command_result'], 'exec_command', command))
     card_id = steps[0]['operation_id'] or steps[0]['output_id'] or uuid4().hex

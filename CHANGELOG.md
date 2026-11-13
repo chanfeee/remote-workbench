@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.26 — verify file edits in the patch request
+
+- Verify the written bytes and deletions for context patches and guarded edits before releasing the managed file locks. Return the result with the complete saved diff.
+- Collect Git line counts during patch application or validation and avoid a separate statistics process.
+
 ## 0.4.25 — complete inline patch diffs
 
 - List every added, edited, deleted, and renamed file in the patch card. Expand files independently to see a unified diff with old and new line numbers.

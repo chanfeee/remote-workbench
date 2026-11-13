@@ -117,3 +117,50 @@ async def test_inline_switch_and_patch_conflict_keep_real_origins_and_skip_check
     assert value['error'] and value['command_skipped']=='apply_not_successful'
     assert (source/'value.txt').read_text()=='original\n'
     assert (other/'value.txt').read_text()=='other\n' and not (other/'must-not-run').exists()
+
+
+async def test_bound_patch_verifies_files_and_preserves_full_diff_in_one_transport(project, monkeypatch):
+    from tests.test_execution_latency import count_transport
+
+    _, server, source, _ = project
+    await call(server, 'a', 'workspace_switch', host='a', cwd=str(source))
+    (source / 'delete.txt').write_text('remove\n')
+    launches = count_transport(monkeypatch)
+    result = await call(server, 'a', 'apply_patch', patch=[
+        '*** Begin Patch', '*** Add File: new.txt', '+added',
+        '*** Update File: value.txt', '@@', '-original', '+updated',
+        '*** Delete File: delete.txt', '*** End Patch',
+    ])
+    assert result['success'] and result['file_verification'] == {'checked': 3, 'failed': []}
+    assert (source / 'new.txt').read_bytes() == b'added\n'
+    assert (source / 'value.txt').read_bytes() == b'updated\n'
+    assert not (source / 'delete.txt').exists()
+    diff = await call(server, 'a', 'read_output', output_id=result['output_id'], stream='diff')
+    assert all(line in diff['content'] for line in ('+added\n', '-original\n+updated\n', '-remove\n'))
+    assert not diff.get('truncated') and len(launches) == 1
+
+
+async def test_failed_file_verification_keeps_diff_and_skips_followup(project, monkeypatch):
+    from remote_workbench import remote_client
+    from tests.test_execution_latency import count_transport
+
+    _, server, source, _ = project
+    await call(server, 'a', 'workspace_switch', host='a', cwd=str(source))
+    # Simulate an external writer after the Git subprocess completes.
+    source_code = remote_client.SOURCE.replace(
+        "result['file_verification'] = verify_patch_files(repo, expected, maximum)",
+        "(repo / 'value.txt').write_text('external\\n')\n"
+        "            result['file_verification'] = verify_patch_files(repo, expected, maximum)",
+    )
+    monkeypatch.setattr(remote_client, 'SOURCE', source_code)
+    launches = count_transport(monkeypatch)
+    result = await call(server, 'a', 'apply_patch', patch=[
+        '*** Begin Patch', '*** Update File: value.txt', '@@', '-original', '+updated', '*** End Patch',
+    ], command=['printf', 'must not run'])
+    assert result['success']
+    assert result['file_verification'] == {'checked': 1, 'failed': [
+        {'path': 'value.txt', 'error': 'content_mismatch'},
+    ]}
+    assert result['command_skipped'] == 'file_verification_failed'
+    diff = await call(server, 'a', 'read_output', output_id=result['output_id'], stream='diff')
+    assert '-original\n+updated\n' in diff['content'] and len(launches) == 1

@@ -238,6 +238,14 @@ const command={tool:'exec_command',host:'server',cwd:'/run',command:hostile,stat
   assert(verificationMarkup.includes('<details class="activity-group">'));
   const unverified=boot({call_tool_result:wrap([edited])});
   assert(unverified.el('activity').innerHTML.includes('未运行'));
+  const checkedFiles=boot({call_tool_result:wrap([{...edited,file_verification:{checked:3,failed:[]}}])});
+  assert(checkedFiles.el('activity').innerHTML.includes('3 个文件已核对'));
+  assert(checkedFiles.el('review').innerHTML.includes('sample.py'));
+  const fileMismatch=boot({call_tool_result:wrap([{...edited,file_verification:{checked:1,
+    failed:[{path:'sample.py',error:'content_mismatch'}]}}])});
+  assert(fileMismatch.el('activity').innerHTML.includes('1 个文件核对失败'));
+  assert(fileMismatch.el('activity').innerHTML.includes('role="alert"'));
+  assert(fileMismatch.el('review').innerHTML.includes('sample.py'));
   const skipped=boot({call_tool_result:wrap([edited,{...command,
     test_summary:{status:'completed',executed:false,passed:0,reported_skips:2}
   }])});
