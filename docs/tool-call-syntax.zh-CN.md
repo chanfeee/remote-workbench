@@ -127,6 +127,8 @@ python -m remote_workbench.call_source docs/examples/edit-request.json
 
 原始补丁可用 `apply_patch(host=..., cwd=..., patch=..., command=..., read_files=...)` 在一次调用里绑定目标、应用补丁、执行检查并回读文件。这个调用仍需审批。内联卡展示补丁 diff 和验证结果，命令和输出默认折叠。失败、状态未知或需要确认的情况单独显示。使用已有 `edit_id` 的受管快照时，沿用创建它的工作区绑定。
 
+应用上下文补丁或受管快照后，远端 worker 在同一次 SSH 请求内核对变更文件的内容和删除结果。`file_verification` 返回核对数量与失败路径，卡片展示同一结果。需要运行项目测试或检查统一 Git diff 的应用结果时，可传入 `command`。仅审阅改动时，直接展开卡片即可。
+
 正常完成的命令结果保留输出、退出码、执行状态和用于回读或汇总的 ID。默认进程组清理细节可用 `workspace_tools(tool="audit_get", arguments={"operation_id": output_id})` 查看。命令的实际目录与所选目录不一致时，结果仍会报告实际目录。
 
 默认优先走支持的 `inspect_batch` 只读路径。首次使用已明确的远端目标时，在操作调用里一起给出 `host` 和绝对 `cwd`。通用命令、只读探测和补丁后检查默认预览最多 4 KiB。通用命令和补丁后检查可用 `max_bytes` 调高预览额度，或按需用 `read_output` 回读完整记录。

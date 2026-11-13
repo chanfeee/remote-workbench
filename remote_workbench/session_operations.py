@@ -107,6 +107,10 @@ async def _complete_patch(snapshot, arguments, result, after):
     if (result.get('success') and not arguments.get('check_only')
             and not result.get('error') and not result.get('timed_out')
             and result.get('execution_state') in (None, 'finished')):
+        if (result.get('file_verification') or {}).get('failed'):
+            if after is not None:
+                result['command_skipped'] = 'file_verification_failed'
+            return
         if arguments.get('prepared_contents') is not None:
             from remote_workbench.prepared_edit import applied_refs
             try:

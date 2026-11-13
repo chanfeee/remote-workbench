@@ -82,10 +82,12 @@ async def test_large_patch_card_lists_every_changed_file_before_paging(project):
     ])
     result = text_result(wire)
     assert result.get('success'), result
+    assert result['file_verification'] == {'checked': 4, 'failed': []}
     assert (source / 'large.txt').read_text() == line + '\n'
     assert (source / 'value.txt').read_text() == 'updated\n'
     assert (source / 'empty.txt').is_file() and not (source / '删除.txt').exists()
     step, = wire.meta['remote-workbench/operation']['steps']
+    assert step['file_verification'] == result['file_verification']
     preview, summary = step['streams']['diff'], step['diff_summary']
     assert preview['truncated'] and 'value.txt' not in preview['content']
     assert summary['complete'] and (summary['added'], summary['deleted']) == (2, 2)
